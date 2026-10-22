@@ -20,7 +20,6 @@ import {
   Film,
   ClipboardCheck,
   PlayCircle,
-  Zap,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -29,6 +28,8 @@ import { useSidebarStore } from "@/_store/sidebarStore";
 import { useNotificationStore } from "@/_store/notificationStore";
 import { useLanguage } from "@/_lib/i18n/LanguageContext";
 import LogoutModal from "@/_components/ui/LogoutModal";
+import KitLogo from "@/_components/brand/KitLogo";
+import PoweredByStarNova from "@/_components/brand/PoweredByStarNova";
 
 const ICONS = {
   LayoutDashboard,
@@ -197,8 +198,15 @@ function SidebarBody({ items, role, session, isCollapsed, onItemClick, onLogout 
     <div className="flex h-full flex-col overflow-hidden">
       {/* Logo block */}
       <div className="flex items-center gap-2.5 border-b border-[var(--sidebar-border)] px-3 py-4">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#10B981] text-white shadow-sm">
-          <Zap className="h-5 w-5" strokeWidth={2.5} fill="currentColor" />
+        {/* The Kids In Tech logo replaces the lightning-bolt placeholder.
+            Same 36px square slot as before, so the header height and the
+            nav below it do not move. */}
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#0B1220] p-1 shadow-sm">
+          <KitLogo
+            variant="mark"
+            className="h-full w-full object-contain"
+            priority
+          />
         </div>
         {!isCollapsed && (
           <div className="flex min-w-0 items-center gap-2">
@@ -318,6 +326,10 @@ function SidebarBody({ items, role, session, isCollapsed, onItemClick, onLogout 
           <LogOut className="h-4 w-4" strokeWidth={2.2} />
           {!isCollapsed && <span>{t("nav.logout")}</span>}
         </button>
+
+        {/* The very bottom of the sidebar, below the user card and Logout.
+            Collapsed, it falls back to the StarNova mark with a tooltip. */}
+        <PoweredByStarNova collapsed={isCollapsed} className="mt-1 w-full" />
       </div>
     </div>
   );

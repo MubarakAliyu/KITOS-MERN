@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:e2e": "playwright test",
-    "mocks:init": "msw init public/"
+    "mocks:init": "msw init public/",
+    "brand": "node scripts/prepare-brand.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -38,6 +39,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "msw": "^2.13.6",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4"
   }
 }

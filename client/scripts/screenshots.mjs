@@ -23,6 +23,20 @@ async function signIn(page, acct) {
   await page.waitForLoadState("networkidle").catch(() => {});
 }
 
+/**
+ * Hides the Next.js dev-tools indicator.
+ *
+ * It is a dev-only affordance pinned to the bottom-left corner, which is
+ * exactly where the sidebar's "Powered by StarNova Labs" sits — so without
+ * this it covers the thing these screenshots exist to show. It is absent from
+ * a production build.
+ */
+async function hideDevOverlay(page) {
+  await page.addStyleTag({
+    content: "nextjs-portal, [data-nextjs-dev-tools-button] { display: none !important; }",
+  }).catch(() => {});
+}
+
 async function setTheme(page, theme) {
   await page.evaluate((t) => {
     localStorage.setItem("theme", t);
@@ -46,12 +60,16 @@ for (const theme of ["light", "dark"]) {
   await setTheme(page, theme);
   await page.reload({ waitUntil: "networkidle" });
   await setTheme(page, theme);
+  await hideDevOverlay(page);
   await page.screenshot({ path: path.join(outDir, `${phase}-login-${theme}-1280.png`), fullPage: false });
 
   // Admin dashboard (sidebar)
   await signIn(page, ACCOUNTS.admin);
   await setTheme(page, theme);
-  await page.waitForTimeout(800);
+  await hideDevOverlay(page);
+  // The stat tiles count up from zero on mount; capture after they settle so
+  // the figures in the evidence are the real ones.
+  await page.waitForTimeout(2500);
   await page.screenshot({ path: path.join(outDir, `${phase}-admin-sidebar-${theme}-1280.png`) });
 
   await browser.close();
@@ -63,6 +81,8 @@ for (const [label, width] of [["375", 375], ["768", 768]]) {
   const ctx = await browser.newContext({ viewport: { width, height: 800 } });
   const page = await ctx.newPage();
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await hideDevOverlay(page);
+  await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(outDir, `${phase}-login-light-${label}.png`) });
   await browser.close();
 }

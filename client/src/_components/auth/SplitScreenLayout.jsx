@@ -1,3 +1,5 @@
+import PoweredByStarNova from "@/_components/brand/PoweredByStarNova";
+
 // Shared two-pane layout for /login, /forgot-password, /reset-password.
 //
 // Breakpoints (Tailwind defaults):
@@ -17,8 +19,19 @@ export default function SplitScreenLayout({ left, right }) {
       </aside>
 
       {/* Form pane — always visible */}
-      <main className="bg-white lg:w-1/2 lg:min-h-screen flex items-center justify-center px-6 py-10 sm:py-12 lg:px-16">
+      <main className="relative bg-white lg:w-1/2 lg:min-h-screen flex items-center justify-center px-6 py-10 pb-24 sm:py-12 sm:pb-24 lg:px-16">
         <div className="w-full max-w-md">{left}</div>
+
+        {/* Centred at the foot of the panel.
+            Taken out of flow on purpose: as a flex sibling it would join the
+            `justify-center` calculation and push the whole form upward, which
+            is a layout change to a design that is meant to be untouched. The
+            panel carries matching bottom padding so the two never collide.
+            `ink="dark"` because this pane is bg-white in both themes. */}
+        <PoweredByStarNova
+          ink="dark"
+          className="absolute inset-x-0 bottom-6 mx-auto w-full max-w-md"
+        />
       </main>
     </div>
   );

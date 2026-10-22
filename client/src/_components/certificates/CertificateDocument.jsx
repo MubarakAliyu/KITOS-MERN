@@ -5,12 +5,14 @@ import {
   Page,
   View,
   Text,
+  Image,
   StyleSheet,
 } from "@react-pdf/renderer";
 
-// Landscape A4 KIT certificate. Pure react-pdf primitives — no external fonts
-// or images so the bundle stays light and the PDF renders identically across
-// platforms.
+// Landscape A4 KIT certificate. react-pdf primitives plus the two brand
+// marks, which are PNGs: <Image> does not load SVG, and they are rendered at
+// 4x their printed size by scripts/prepare-brand.mjs so they stay sharp on
+// paper. No external fonts, so the PDF renders identically across platforms.
 
 const TEAL = "#10B981";
 const NAVY = "#0B1220";
@@ -28,7 +30,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 36,
   },
-  logo: { color: "#FFFFFF", fontSize: 16, fontWeight: 700 },
+  logo: { height: 34, width: 73 },
   ribbon: { color: "#FFFFFF", fontSize: 10, letterSpacing: 4 },
 
   content: {
@@ -135,7 +137,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 36,
   },
   bandText: { color: "#9CA3AF", fontSize: 8 },
-  bandCenter: { color: "#FFFFFF", fontSize: 9, letterSpacing: 1 },
+  bandCol: { flex: 1 },
+  bandColRight: { flex: 1, alignItems: "flex-end" },
+
+  // "Powered by StarNova Labs" sits centred in the navy footer band, so the
+  // white wordmark is the right one.
+  poweredWrap: { flex: 1, alignItems: "center" },
+  poweredLabel: {
+    color: "#9CA3AF",
+    fontSize: 6,
+    letterSpacing: 1.5,
+    marginBottom: 2,
+  },
+  poweredMark: { height: 11, width: 79 },
 });
 
 function formatDate(value) {
@@ -161,7 +175,8 @@ export function CertificateDocument({ cert }) {
       <Page size="A4" orientation="landscape" style={styles.page}>
         {/* Top band */}
         <View style={styles.topBand}>
-          <Text style={styles.logo}>Kids In Tech</Text>
+          {/* The Kids In Tech logo, in place of the wordmark set in type. */}
+          <Image style={styles.logo} src="/brand/kit-logo.png" />
           <Text style={styles.ribbon}>CERTIFICATE OF COMPLETION</Text>
         </View>
 
@@ -219,9 +234,22 @@ export function CertificateDocument({ cert }) {
 
         {/* Bottom band */}
         <View style={styles.bottomBand}>
-          <Text style={styles.bandText}>Certificate ID: {cert.id}</Text>
-          <Text style={styles.bandCenter}>kidsintech.school</Text>
-          <Text style={styles.bandText}>{verificationCode(cert.id)}</Text>
+          <View style={styles.bandCol}>
+            <Text style={styles.bandText}>Certificate ID: {cert.id}</Text>
+            <Text style={styles.bandText}>kidsintech.school</Text>
+          </View>
+
+          <View style={styles.poweredWrap}>
+            <Text style={styles.poweredLabel}>POWERED BY</Text>
+            <Image
+              style={styles.poweredMark}
+              src="/brand/starnova-logo-light.png"
+            />
+          </View>
+
+          <View style={styles.bandColRight}>
+            <Text style={styles.bandText}>{verificationCode(cert.id)}</Text>
+          </View>
         </View>
       </Page>
     </Document>
