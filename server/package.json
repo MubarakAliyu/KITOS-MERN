@@ -1,0 +1,45 @@
+{
+  "name": "kitos-server",
+  "version": "2.0.0",
+  "private": true,
+  "description": "KITOS 2.0 API — Express 5 + MongoDB for the Kids In Tech LMS.",
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon --watch src --ext js,json src/index.js",
+    "db:local": "node scripts/db-local.mjs",
+    "seed": "node src/seed/seed.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.19.1",
+    "nodemailer": "^10.2.1",
+    "pino": "^9.13.1",
+    "pino-http": "^11.0.0",
+    "sanitize-html": "^2.17.0",
+    "socket.io": "^4.8.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "mongodb-memory-server": "^10.2.3",
+    "nodemon": "^3.1.10",
+    "supertest": "^7.1.4",
+    "vitest": "^3.2.4"
+  }
+}
