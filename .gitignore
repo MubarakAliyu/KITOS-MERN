@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment — names only ever live in .env.example
+.env
+.env.*
+!.env.example
+
+# Next.js
+client/.next/
+client/out/
+client/build/
+next-env.d.ts
+
+# Server local state (in-memory Mongo data, outbox, uploads)
+server/.local/
+server/uploads/
+
+# Test + coverage output
+coverage/
+.nyc_output/
+client/test-results/
+client/playwright-report/
+client/blob-report/
+client/playwright/.cache/
+
+# Generated demo credentials (written by the guarded production seed)
+docs/DEMO-ACCOUNTS.md
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Vercel / Turbo
+.vercel
+.turbo
