@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import { env, isProduction } from "../config/env.js";
 import { connectDb, disconnectDb } from "../config/db.js";
 import { logger } from "../lib/logger.js";
+import { DOCS_DIR } from "../lib/paths.js";
 import { User, hashPassword } from "../models/User.js";
 import { Student } from "../models/Student.js";
 import { Consent } from "../models/Consent.js";
@@ -154,6 +155,7 @@ export async function runSeed({ quiet = false } = {}) {
       role: "instructor",
       name: instructor.name,
       email: instructor.email,
+      bio: instructor.bio ?? null,
       password_hash: hashes.staff,
       is_active: true,
     });
@@ -278,7 +280,7 @@ export async function runSeed({ quiet = false } = {}) {
   // rather than printed, so they are not left in a terminal scrollback or a
   // CI log.
   if (isProduction()) {
-    const file = path.resolve("docs/DEMO-ACCOUNTS.md");
+    const file = path.join(DOCS_DIR, "DEMO-ACCOUNTS.md");
     await writeFile(
       file,
       [

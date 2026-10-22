@@ -7,8 +7,7 @@ import { ChevronLeft, MessageSquare, Search, X } from "lucide-react";
 import { useChat } from "@/_hooks/useChat";
 import { ChatWindow } from "@/_components/chat/ChatWindow";
 import { getAllConversations, getMessages } from "@/_lib/api/chat";
-
-const ADMIN_ID = "admin1";
+import { useSession } from "next-auth/react";
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -38,6 +37,13 @@ function isStudentInstructor(roles = []) {
 }
 
 export default function AdminChatPage() {
+  // The signed-in administrator's own id. This used to be the hard-coded
+  // "admin1" from the mock fixtures, which is not a real user id against the
+  // live API — conversations would be fetched for a user that does not exist
+  // and every message would align as if someone else had sent it.
+  const { data: session } = useSession();
+  const adminId = session?.user?.id ?? null;
+
   // Admin participates in parent ↔ admin conversations through useChat (so
   // it gets the same optimistic send + socket lifecycle), but the *list* on
   // the left comes from the cross-conversation monitor endpoint so admin
@@ -53,7 +59,7 @@ export default function AdminChatPage() {
     sendMessage,
     emitTyping,
     allConversations: parentAdminConvs,
-  } = useChat(ADMIN_ID);
+  } = useChat(adminId);
 
   const [allConvs, setAllConvs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -291,7 +297,7 @@ export default function AdminChatPage() {
                   messages={hookMessages}
                   onSend={sendMessage}
                   sending={sending}
-                  currentUserId={ADMIN_ID}
+                  currentUserId={adminId}
                   typingUsers={typingUsers}
                   socketConnected={socketConnected}
                   emitTyping={emitTyping}
@@ -301,7 +307,7 @@ export default function AdminChatPage() {
                   conversation={readOnlyConversation}
                   messages={readOnlyMessages[activeConvId] ?? []}
                   onSend={() => {}}
-                  currentUserId={ADMIN_ID}
+                  currentUserId={adminId}
                   socketConnected={socketConnected}
                   readOnly
                   readOnlyMessage="This is a student-instructor conversation. Admin view only."
@@ -313,7 +319,7 @@ export default function AdminChatPage() {
               conversation={null}
               messages={[]}
               onSend={() => {}}
-              currentUserId={ADMIN_ID}
+              currentUserId={adminId}
               socketConnected={socketConnected}
             />
           )}

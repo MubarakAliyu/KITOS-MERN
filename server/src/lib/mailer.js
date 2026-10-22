@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { OUTBOX_DIR } from "./paths.js";
 import nodemailer from "nodemailer";
 import { env } from "../config/env.js";
 import { logger } from "./logger.js";
@@ -12,8 +13,6 @@ import { logger } from "./logger.js";
  * message is written to `server/.local/outbox/*.eml` and a line is logged, so
  * a password-reset link can be read off disk without a mail account.
  */
-
-const OUTBOX_DIR = path.resolve("server/.local/outbox");
 
 let transporter;
 

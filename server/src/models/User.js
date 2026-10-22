@@ -53,6 +53,9 @@ const userSchema = new mongoose.Schema({
   avatar_url: { type: String, default: null },
   phone: { type: String, default: null },
 
+  /** Instructor biography, shown on the instructor profile screen. */
+  bio: { type: String, default: null },
+
   last_login_at: { type: Date, default: null },
 
   reset_token_hash: { type: String, default: null, select: false },

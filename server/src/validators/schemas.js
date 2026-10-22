@@ -224,3 +224,23 @@ export const updateSettingsBody = z
     permissions: z.record(z.string(), z.array(z.enum(ROLES))).optional(),
   })
   .strict();
+
+// ── Notifications ───────────────────────────────────────────────────────────
+
+/** Lenient: the frontend appends `?user_id=` from its mock-era habit. */
+export const listNotificationsQuery = z.object({
+  user_id: objectIdSchema.optional(),
+});
+
+export const sendNotificationBody = z
+  .object({
+    type: z.string().trim().max(60).optional(),
+    title: z.string().trim().min(1, "A title is required").max(120),
+    message: z.string().trim().max(1000).optional(),
+    link: z.string().trim().max(300).nullish(),
+    audience: z.enum(["all", "role", "course"]).optional(),
+    target: z.string().trim().max(60).nullish(),
+    // adminNotify.js sends an arbitrary event payload alongside the copy.
+    priority: z.boolean().optional(),
+  })
+  .passthrough();

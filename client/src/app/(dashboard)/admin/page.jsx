@@ -55,8 +55,6 @@ import CreateCourseModal from "@/_components/admin/CreateCourseModal";
 import AnnouncementModal from "@/_components/admin/AnnouncementModal";
 import AdminSessionsWidget from "@/_components/sessions/AdminSessionsWidget";
 
-const ADMIN_USER_ID = "admin1";
-
 function formatNaira(n) {
   return `₦${Number(n).toLocaleString("en-NG")}`;
 }
@@ -94,7 +92,10 @@ export default function AdminDashboardHome() {
       getPendingEnrollments(),
       getAdminUsers(),
       getAdminCourses(),
-      getNotifications(ADMIN_USER_ID),
+      // No id: the API returns the signed-in user's own feed. It used to pass
+      // "admin1", the mock fixtures' key, which is not an ObjectId and 400s
+      // against the real API.
+      getNotifications(),
       getPaymentStats().catch(() => null),
     ])
       .then(([s, a, pe, u, c, n, ps]) => {

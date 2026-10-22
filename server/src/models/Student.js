@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { serializePlugin } from "../lib/serialize.js";
+import { serializePlugin, avatarInitial } from "../lib/serialize.js";
 import {
   PROGRAMME_TRACKS,
   STUDENT_STATUSES,
@@ -76,7 +76,7 @@ studentSchema.methods.toParentJSON = function toParentJSON(extra = {}) {
     name: this.name,
     age: this.age,
     programme_track: toTrackLabel(this.programme_track),
-    avatar_initial: this.name?.trim().charAt(0).toUpperCase() || "?",
+    avatar_initial: avatarInitial(this.name),
     enrolled_courses: 0,
     completed_courses: 0,
     status: this.status,

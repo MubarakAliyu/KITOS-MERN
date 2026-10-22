@@ -13,6 +13,7 @@ import {
   passwordChangeLimiter,
 } from "../middleware/rateLimit.js";
 import * as s from "../validators/schemas.js";
+import { placeholderRouter } from "./placeholders.js";
 
 /**
  * Every Batch 1 route.
@@ -257,3 +258,44 @@ router.post(
   validate({ body: s.updateSettingsBody }),
   c.postPlatformSettings
 );
+
+// ── Notifications ───────────────────────────────────────────────────────────
+// The model ships in Batch 1 and already holds real rows, so the read side is
+// implemented here rather than 404ing the bell on every dashboard (ADR-019).
+
+router.get(
+  "/notifications",
+  authenticate,
+  validate({ query: s.listNotificationsQuery }),
+  c.getNotifications
+);
+
+router.put(
+  "/notifications/read-all",
+  authenticate,
+  c.putNotificationsReadAll
+);
+
+router.put(
+  "/notifications/:id/read",
+  authenticate,
+  validate({ params: idParamSchema }),
+  c.putNotificationRead
+);
+
+/**
+ * Shared by the admin Announcement modal and by adminNotify.js, which fires
+ * platform events from any signed-in user. The service decides the audience:
+ * a non-admin can only ever notify administrators.
+ */
+router.post(
+  "/admin/notifications/send",
+  authenticate,
+  requirePermission("chat.use"),
+  validate({ body: s.sendNotificationBody }),
+  c.postSendNotification
+);
+
+// ── Batch 2 and 3 placeholders ──────────────────────────────────────────────
+// Registered last so a real route above always wins. See routes/placeholders.js.
+router.use(placeholderRouter);

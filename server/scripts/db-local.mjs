@@ -14,11 +14,11 @@
  *   npm run dev
  */
 import { mkdir } from "node:fs/promises";
-import path from "node:path";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
+import { MONGO_DATA_DIR } from "../src/lib/paths.js";
 
 const PORT = 27027;
-const DATA_DIR = path.resolve("server/.local/mongo");
+const DATA_DIR = MONGO_DATA_DIR;
 
 async function main() {
   await mkdir(DATA_DIR, { recursive: true });

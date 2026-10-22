@@ -3,6 +3,7 @@ import * as userService from "../services/user.service.js";
 import * as adminService from "../services/admin.service.js";
 import * as familyService from "../services/family.service.js";
 import * as settingsService from "../services/settings.service.js";
+import * as notificationService from "../services/notification.service.js";
 import { clientIp, logActivity } from "../lib/audit.js";
 import { dbStatus } from "../config/db.js";
 
@@ -267,4 +268,34 @@ export const postPlatformSettings = handle(async (req, res) => {
   res
     .status(200)
     .json(permissions ? await settingsService.getSettings() : settings);
+});
+
+// ── Notifications ───────────────────────────────────────────────────────────
+
+export const getNotifications = handle(async (req, res) => {
+  const rows = await notificationService.listNotifications({
+    user: req.user,
+    userId: req.query.user_id,
+  });
+  res.status(200).json(rows);
+});
+
+export const putNotificationRead = handle(async (req, res) => {
+  const result = await notificationService.markRead({
+    user: req.user,
+    id: req.params.id,
+  });
+  res.status(200).json(result);
+});
+
+export const putNotificationsReadAll = handle(async (req, res) => {
+  res.status(200).json(await notificationService.markAllRead({ user: req.user }));
+});
+
+export const postSendNotification = handle(async (req, res) => {
+  const result = await notificationService.sendNotification({
+    user: req.user,
+    payload: req.body,
+  });
+  res.status(200).json(result);
 });

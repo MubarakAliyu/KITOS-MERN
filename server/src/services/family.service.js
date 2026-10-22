@@ -8,6 +8,7 @@ import { generateTempPassword } from "../lib/tokens.js";
 import { logActivity } from "../lib/audit.js";
 import { sendMail, childAccountEmail } from "../lib/mailer.js";
 import { forbidden, notFound, badRequest } from "../lib/errors.js";
+import { avatarInitial } from "../lib/serialize.js";
 import {
   toTrackSlug,
   toTrackLabel,
@@ -291,7 +292,7 @@ export function getInstructorProfile(user) {
     name: user.name,
     email: user.email ?? null,
     bio: user.bio ?? null,
-    avatar_initial: user.name?.trim().charAt(0).toUpperCase() || "?",
+    avatar_initial: avatarInitial(user.name),
     courses_count: 0,
     students_count: 0,
     joined: user.created_at?.toISOString().slice(0, 10) ?? null,

@@ -72,3 +72,34 @@ export function koboToNaira(kobo) {
 export function nairaToKobo(naira) {
   return Math.round(Number(naira ?? 0) * 100);
 }
+
+/** Honorifics that must not become someone's avatar initial. */
+const HONORIFICS = new Set([
+  "mr", "mrs", "ms", "miss", "mx", "dr", "prof", "master", "sir", "madam",
+  "alhaji", "hajiya", "malam", "malama",
+]);
+
+/**
+ * The initial shown in an avatar circle.
+ *
+ * Skips a leading title, so "Ms. Sarah Aliyu" gives "S" and not "M" — which
+ * is what the frontend's fixtures expect (INSTRUCTOR_ME.avatar_initial is
+ * "S"), and the only sensible answer for a Nigerian roster where "Alhaji" and
+ * "Malama" are common.
+ */
+export function avatarInitial(name) {
+  const words = String(name ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  for (const word of words) {
+    const bare = word.replace(/[.,]/g, "").toLowerCase();
+    if (!HONORIFICS.has(bare)) {
+      const letter = word.replace(/[^\p{L}]/gu, "").charAt(0);
+      if (letter) return letter.toUpperCase();
+    }
+  }
+
+  return "?";
+}
