@@ -1,0 +1,18 @@
+import { chromium } from "@playwright/test";
+const OUT = process.argv[2];
+const browser = await chromium.launch();
+const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+await page.goto("http://localhost:3004/login", { waitUntil: "networkidle" });
+await page.getByLabel(/email or admission number/i).fill("admin@kidsintech.school");
+await page.getByLabel(/^password$/i).fill("KIT@admin2025");
+await page.getByRole("button", { name: /sign in/i }).click();
+await page.waitForURL(/\/admin/, { timeout: 45000 });
+await page.waitForTimeout(1500);
+await page.getByRole("button", { name: /collapse sidebar/i }).click();
+await page.waitForTimeout(900);
+await page.addStyleTag({ content: "nextjs-portal{display:none!important}" }).catch(()=>{});
+const mark = await page.locator('aside img[alt="Kids In Tech"]').first().boundingBox();
+console.log("collapsed mark box:", JSON.stringify(mark));
+await page.locator("aside").first().screenshot({ path: OUT + "/after-admin-sidebar-collapsed-light-1280.png" });
+console.log("saved collapsed sidebar screenshot");
+await browser.close();
