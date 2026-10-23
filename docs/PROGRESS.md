@@ -3,7 +3,7 @@
 | Batch | Branch | Status | Date | Notes |
 |---|---|---|---|---|
 | Docs | main | ✅ Done | 17 Oct 2026 | Project report (Ch. 1–5), PRD, CLAUDE.md, LAB-PHASES, ADR-001–008, batch prompts |
-| 1 — Backend foundation, identity and brand | batch/01-foundation | ✅ Done | 23 Oct 2026 | Express 5 + MongoDB API, 8 models, 29 endpoints, 315 server tests, Playwright + axe, CI, KIT logo and StarNova attribution |
+| 1 — Backend foundation, identity and brand | batch/01-foundation | ✅ Done | 23 Oct 2026 | Express 5 + MongoDB API, 8 models, 33 endpoints, 315 server tests, Playwright + axe, CI, KIT logo and StarNova attribution |
 | 2 — Learning core and hybrid sessions | batch/02-learning-sessions | ⏳ Not started | | |
 | 3 — Real-time, payments, admin and deployment | batch/03-realtime-payments-deploy | ⏳ Not started | | |
 
@@ -25,7 +25,7 @@ Tech logo and "Powered by StarNova Labs" attribution are in place.
   `Notification`, with PRD §8.2 fields and indexes.
 - **Auth** — JWT HS256 with the algorithm pinned, 24 h, `tv` token-version check; bcrypt cost 12;
   SHA-256 hashed single-use reset tokens; rate limits on sign-in and password routes.
-- **Endpoints** — 29 implemented, plus 12 reads that answer empty until Batches 2 and 3 (ADR-018).
+- **Endpoints** — 33 implemented, plus 13 reads that answer empty until Batches 2 and 3 (ADR-018).
 - **Seed** — the frontend's demo world: 2 admins, 2 instructors, 3 parents, 8 students on
   `KIT/26/001…`, consents, 3 cohorts, settings. Guarded against production.
 - **Brand** — `npm run brand` builds `public/brand/` from the master files; `KitLogo` and
@@ -43,7 +43,7 @@ Tech logo and "Powered by StarNova Labs" attribution are in place.
 **Tests** — `npm test` → 315 passing across 5 files (auth 30, permissions 205, admin 29, family 22,
 validation 29). `npm --prefix client run test:e2e` → 40 passing across two device profiles.
 
-**Endpoints covered** — 29 of roughly 70 in the frontend's contract. Every Batch 1 endpoint in PRD §9.1
+**Endpoints covered** — 33 of roughly 70 in the frontend's contract. Every Batch 1 endpoint in PRD §9.1
 and §9.2, plus the notification reads brought forward (ADR-019). Documented in
 [`docs/API.md`](API.md).
 
