@@ -22,8 +22,26 @@ const settingSchema = new mongoose.Schema({
   primary_color: { type: String, default: "#10B981" },
   logo_url: { type: String, default: "/brand/kit-logo.png" },
 
-  /** `{ "users.manage": ["admin"], … }` — see config/permissions.js. */
-  permissions: { type: mongoose.Schema.Types.Mixed, default: {} },
+  /**
+   * Permission-matrix overrides, as a list rather than an object.
+   *
+   * Permission keys are dotted (`users.manage`), and a dotted *field name* in
+   * MongoDB is a long-standing footgun: it cannot be addressed by a normal
+   * dot path, so querying or updating one individually is awkward and easy to
+   * get wrong. Storing `[{ key, roles }]` keeps the document queryable. The
+   * API still speaks the object shape the PRD specifies; conversion happens
+   * in settings.service.js.
+   */
+  permissions: {
+    type: [
+      {
+        _id: false,
+        key: { type: String, required: true },
+        roles: [{ type: String }],
+      },
+    ],
+    default: [],
+  },
 });
 
 settingSchema.plugin(serializePlugin);

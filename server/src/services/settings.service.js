@@ -2,6 +2,23 @@ import { Setting } from "../models/Setting.js";
 import { applyOverrides, getMatrix } from "../config/permissions.js";
 import { logger } from "../lib/logger.js";
 
+/** Stored `[{ key, roles }]` → the `{ key: roles }` shape the API speaks. */
+function overridesToObject(stored) {
+  const out = {};
+  for (const row of stored ?? []) {
+    if (row?.key) out[row.key] = [...(row.roles ?? [])];
+  }
+  return out;
+}
+
+/** The API's object shape → the `[{ key, roles }]` the document stores. */
+function overridesToArray(object) {
+  return Object.entries(object ?? {}).map(([key, roles]) => ({
+    key,
+    roles: [...roles],
+  }));
+}
+
 /**
  * Platform settings and the permission-matrix overrides stored with them.
  * Replaces the legacy `api/settings.json` file (FR19).
@@ -61,10 +78,11 @@ export async function savePermissions(overrides) {
 
   // Store only what was accepted, so the stored document and the live matrix
   // can never disagree.
+  const matrix = getMatrix();
   const stored = {};
-  for (const key of applied) stored[key] = getMatrix()[key];
+  for (const key of applied) stored[key] = matrix[key];
 
-  doc.permissions = stored;
+  doc.permissions = overridesToArray(stored);
   doc.markModified("permissions");
   await doc.save();
 
@@ -84,7 +102,7 @@ export async function savePermissions(overrides) {
 export async function loadPermissionOverrides() {
   try {
     const doc = await Setting.getSingleton();
-    const { applied, ignored } = applyOverrides(doc.permissions ?? {});
+    const { applied, ignored } = applyOverrides(overridesToObject(doc.permissions));
     if (applied.length > 0) {
       logger.info(
         { count: applied.length },

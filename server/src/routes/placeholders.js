@@ -26,10 +26,12 @@ import { authenticate } from "../middleware/authenticate.js";
  */
 export const placeholderRouter = Router();
 
-/** Every route below needs a signed-in user. */
-placeholderRouter.use(authenticate);
-
-const empty = (body) => (_req, res) => res.status(200).json(body);
+/**
+ * Every route below needs a signed-in user — attached per route rather than
+ * with `router.use`, which would run on *every* unmatched path and make a
+ * typo'd URL answer "Authentication required" instead of 404.
+ */
+const empty = (body) => [authenticate, (_req, res) => res.status(200).json(body)];
 
 // ── Batch 2: learning content ───────────────────────────────────────────────
 

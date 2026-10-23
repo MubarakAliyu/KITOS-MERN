@@ -3,7 +3,16 @@ import dotenv from "dotenv";
 
 // Load .env before parsing. In production Render injects real environment
 // variables and there is no file to read, which dotenv treats as a no-op.
-dotenv.config({ quiet: true });
+//
+// Never under test. A developer's local server/.env would otherwise supply
+// JWT_SECRET and MONGODB_URI to the suite, so tests would run against the
+// developer's settings locally and the harness's settings on CI — and a token
+// signed by a test with one secret would be verified by the app with another,
+// which fails in a way that looks like a bug in the code under test rather
+// than in the setup. The test harness owns the environment completely.
+if (process.env.NODE_ENV !== "test") {
+  dotenv.config({ quiet: true });
+}
 
 const nonEmpty = (label) =>
   z.string({ error: `${label} is required` }).trim().min(1, `${label} must not be empty`);

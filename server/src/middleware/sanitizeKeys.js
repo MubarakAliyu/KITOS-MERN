@@ -28,14 +28,15 @@ function isPlainObject(value) {
  * @param {number} [depth]
  * @returns {{ value: unknown, removed: string[] }}
  */
-export function sanitizeValue(input, depth = 0) {
+export function sanitizeValue(input, depth = 0, options = {}) {
+  const { allowDots = false } = options;
   const removed = [];
 
   if (depth > 12) return { value: undefined, removed };
 
   if (Array.isArray(input)) {
     const value = input.map((item) => {
-      const result = sanitizeValue(item, depth + 1);
+      const result = sanitizeValue(item, depth + 1, options);
       removed.push(...result.removed);
       return result.value;
     });
@@ -45,11 +46,11 @@ export function sanitizeValue(input, depth = 0) {
   if (isPlainObject(input)) {
     const value = {};
     for (const [key, raw] of Object.entries(input)) {
-      if (key.startsWith("$") || key.includes(".")) {
+      if (key.startsWith("$") || (!allowDots && key.includes("."))) {
         removed.push(key);
         continue;
       }
-      const result = sanitizeValue(raw, depth + 1);
+      const result = sanitizeValue(raw, depth + 1, options);
       removed.push(...result.removed);
       value[key] = result.value;
     }
@@ -58,6 +59,23 @@ export function sanitizeValue(input, depth = 0) {
 
   return { value: input, removed };
 }
+
+/**
+ * Routes whose body legitimately contains dotted keys.
+ *
+ * Permission keys are dotted by design — `users.manage`, `analytics.view` —
+ * so stripping dots here would quietly empty the payload and make
+ * POST /admin/permissions report success while saving nothing. These bodies
+ * are still parsed by Zod, and `applyOverrides` checks every key against a
+ * fixed allow-list, so a dotted key can never reach Mongo as a path.
+ *
+ * `$`-prefixed keys are stripped on these routes as everywhere else: there is
+ * no legitimate reason for one in any request.
+ */
+const DOTTED_BODY_KEYS_ALLOWED = new Set([
+  "/admin/permissions",
+  "/platform/settings",
+]);
 
 /**
  * Cleans `body`, `params` and `query` on every request.
@@ -70,8 +88,13 @@ export function sanitizeValue(input, depth = 0) {
 export function sanitizeKeys(req, _res, next) {
   const dropped = [];
 
+  // `req.path` is the path within the app, without the query string.
+  const bodyOptions = {
+    allowDots: DOTTED_BODY_KEYS_ALLOWED.has(req.path),
+  };
+
   if (req.body !== undefined) {
-    const { value, removed } = sanitizeValue(req.body);
+    const { value, removed } = sanitizeValue(req.body, 0, bodyOptions);
     req.body = value;
     dropped.push(...removed);
   }
