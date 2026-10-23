@@ -169,6 +169,11 @@ jobs:
           JWT_SECRET: ci-only-jwt-secret-that-is-at-least-32-bytes
           CLIENT_ORIGIN: http://localhost:3004
           LOG_LEVEL: warn
+          # The suite signs in as the same few demo accounts dozens of times,
+          # which the real 10-per-15-minutes limit would stop halfway through.
+          # This throwaway API only; the limiter itself is covered by the
+          # server tests.
+          LOGIN_RATE_LIMIT_MAX: 1000
         run: npm start &
 
       - name: Wait for the API

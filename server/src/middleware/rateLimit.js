@@ -38,7 +38,8 @@ const base = {
 export const loginLimiter = rateLimit({
   ...base,
   windowMs: 15 * 60 * 1000,
-  limit: 10,
+  // 10 by default; see LOGIN_RATE_LIMIT_MAX in config/env.js.
+  limit: env.LOGIN_RATE_LIMIT_MAX,
   keyGenerator: (req) => {
     const identifier = String(req.body?.email ?? req.body?.identifier ?? "")
       .trim()

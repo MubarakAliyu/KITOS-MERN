@@ -62,6 +62,17 @@ const schema = z.object({
   DEMO_STAFF_PASSWORD: z.string().optional(),
   DEMO_FAMILY_PASSWORD: z.string().optional(),
 
+  /**
+   * Sign-in attempts allowed per 15 minutes, per IP and identifier.
+   *
+   * 10 is the PRD §10 requirement and the default everywhere, including
+   * production. It is configurable for exactly one reason: the end-to-end
+   * suite signs in as the same handful of demo accounts dozens of times in a
+   * few minutes, and would otherwise lock itself out halfway through. CI
+   * raises it for the throwaway API it starts, and nowhere else.
+   */
+  LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
