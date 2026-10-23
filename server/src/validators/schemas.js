@@ -171,15 +171,22 @@ export const assignInstructorBody = z
   .strict();
 
 /**
- * Permission overrides: `{ "users.manage": ["admin"], … }`.
+ * Permissions, in either of the two shapes this endpoint serves (ADR-021):
+ * the PRD's role matrix (`{ "users.manage": ["admin"] }`) or the roles
+ * screen's per-administrator sections (`{ "<id>": { dashboard: true } }`).
  *
- * Validated loosely on purpose — `config/permissions.js` is what decides which
- * keys and roles are real, and reports back what it ignored. Duplicating that
- * list here would let the two drift apart.
+ * Validated loosely on purpose. The services decide which keys, roles and
+ * ids are real and report back what they ignored; restating those lists here
+ * would only let the two drift apart.
  */
 export const savePermissionsBody = z
   .object({
-    permissions: z.record(z.string(), z.array(z.enum(ROLES))).optional(),
+    permissions: z
+      .record(
+        z.string(),
+        z.union([z.array(z.enum(ROLES)), z.record(z.string(), z.boolean())])
+      )
+      .optional(),
   })
   .passthrough();
 

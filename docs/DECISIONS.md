@@ -131,8 +131,9 @@ otherwise a student could broadcast to every parent on the platform. Audience ta
 and course-scoped audiences are refused with an explanation until enrolments exist. Batch 3 adds the
 `Announcement` model, course audiences and the Socket.IO push.
 
-## ADR-020 — Palette contrast fails WCAG AA, and needs a brand decision
-**Status:** Open — needs the client. White text on the brand emerald `#10B981` has a contrast ratio of
+## ADR-020 — Palette contrast fails WCAG AA; the palette stands
+**Status:** **Accepted** (23 Oct 2026) — decided by the product owner: keep the emerald `#10B981`
+palette unchanged, and carry the contrast shortfall as a documented exception. White text on the brand emerald `#10B981` has a contrast ratio of
 2.53:1, against the 4.5:1 WCAG AA requires of small text. It appears wherever the design puts white on
 emerald: the sidebar "LMS" badge, role chips and primary buttons. Five pairs fail in total — white and
 pale mint on the emerald, white on red-500 for the unread badge, Sonner's success green on its own mint
@@ -152,22 +153,41 @@ for, because `--text-muted` fails AA in both themes.
 The E2E assertion allows these five pairings through **by exact colour, per node**, so any other serious
 or critical violation — including a contrast failure involving any other pair — still fails the build.
 
-Options for Batch 3, for the client to choose: darken the emerald for small text only; put dark navy
+**The decision.** The palette is the brand, and the brand is not a developer's to change. The emerald
+stays as it is; the shortfall is accepted knowingly rather than hidden. Accessibility work in later
+batches must not widen it: the exemption is a fixed list of nine colour pairs, matched per node by
+exact colour, so a contrast failure involving any other pair — or any other serious or critical rule —
+still fails the build. Anything new is a regression, not a precedent.
+
+If it is revisited later, the options remain: darken the emerald for small text only; put dark navy
 text on emerald instead of white; or reserve white-on-emerald for large or bold text, where AA asks
-only 3:1.
+only 3:1. Recorded under limitations in `docs/PROGRESS.md`.
 
 ## ADR-021 — The permissions screen and the PRD matrix disagree
-**Status:** Open — reconciled in Batch 3. PRD §10.1 and §9.2 define permissions as a **role** matrix
+**Status:** **Accepted** (23 Oct 2026) — decided by the product owner: the frontend contract wins for
+this endpoint. Both shapes are now implemented. PRD §10.1 and §9.2 define permissions as a **role** matrix
 (`{ "users.manage": ["admin"] }`), and that is what the server enforces and what
 `POST /admin/permissions` accepts. The retained admin settings screen sends something different: a map
 of **admin user id** to feature booleans (`{ "<userId>": { dashboard: true, users: true, … } }`). The
 mock handler ignored its body entirely and returned `{ success: true }`, so the mismatch was never
 visible.
 
-The PRD wins, so the endpoint implements the role matrix. Unknown keys come back in `ignored` rather
-than being silently dropped, so nothing is lost without a trace. Wiring per-administrator feature access
-needs a per-user permission model the PRD does not define, and belongs with the settings work in Batch 3
-(FR19); until then that screen's toggles do not change enforcement. Carried in `docs/PROGRESS.md`.
+**The decision.** `POST /admin/permissions` accepts and persists exactly what the screen sends, and
+`GET /admin/users` returns it on each administrator's row as `permissions` — which is where that screen
+reads it from. The toggles live on the user document as `admin_sections`, defaulting to every section
+enabled.
+
+**They are visibility, not authorisation.** What an administrator may actually *do* is still decided
+solely by the role matrix in `config/permissions.js`, which these toggles cannot widen or narrow. A
+test turns every section off for an administrator and asserts that the admin endpoints still answer:
+hiding a section in the navigation is a preference, and treating it as a permission would be the "UI
+hiding is not security" mistake the PRD warns against. The two concepts are deliberately kept in
+separate fields with separate names.
+
+The endpoint serves both shapes, told apart by their keys — a permission key is a dotted name, an
+administrator id is 24 hex characters. A payload mixing the two is refused rather than guessed at. An
+unrecognised key is treated as a mistyped matrix key and reported in `ignored`, so one typo cannot
+discard an otherwise valid save.
 
 ## ADR-022 — Local-only state is anchored to the server directory, never the working directory
 **Status:** Accepted. `lib/paths.js` resolves `server/.local`, the mail outbox and the docs directory

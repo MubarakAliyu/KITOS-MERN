@@ -1,7 +1,12 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import { serializePlugin } from "../lib/serialize.js";
-import { ROLES, LANGUAGES, BCRYPT_ROUNDS } from "../config/constants.js";
+import {
+  ROLES,
+  LANGUAGES,
+  BCRYPT_ROUNDS,
+  defaultAdminSections,
+} from "../config/constants.js";
 
 /**
  * A sign-in identity for all four roles (PRD §8.2).
@@ -55,6 +60,19 @@ const userSchema = new mongoose.Schema({
 
   /** Instructor biography, shown on the instructor profile screen. */
   bio: { type: String, default: null },
+
+  /**
+   * Per-administrator dashboard section visibility (ADR-021).
+   *
+   * `{ dashboard: true, users: false, … }`, as the roles screen sends it.
+   * These hide sections in the admin UI; they are **not** authorisation.
+   * What an administrator may actually do is decided by the role matrix in
+   * `config/permissions.js`, which this cannot widen or narrow.
+   */
+  admin_sections: {
+    type: mongoose.Schema.Types.Mixed,
+    default: undefined,
+  },
 
   last_login_at: { type: Date, default: null },
 
@@ -152,6 +170,10 @@ userSchema.methods.toAdminJSON = function toAdminJSON(extra = {}) {
     phone: this.phone ?? null,
     last_login_at: this.last_login_at?.toISOString() ?? null,
     created_at: this.created_at?.toISOString() ?? null,
+    // The roles screen reads `permissions` off each admin row (ADR-021).
+    ...(this.role === "admin"
+      ? { permissions: this.admin_sections ?? defaultAdminSections() }
+      : {}),
     ...extra,
   };
 };

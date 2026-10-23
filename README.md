@@ -205,10 +205,9 @@ Where the PRD and a batch prompt disagree, the PRD wins, and the conflict is rec
 
 - Batches 2 and 3 are not built. Screens that need them render their empty states against endpoints
   that return empty, correctly shaped data (ADR-018).
-- Five colour pairings in the brand palette fail WCAG AA contrast and need a brand decision before
-  they can be fixed (ADR-020).
-- The admin permissions screen sends a shape the PRD does not define; the server implements the PRD's
-  role matrix and reports what it ignored (ADR-021).
+- Nine colour pairings in the brand palette fail WCAG AA contrast. The product owner has decided the
+  emerald palette stands, so this is an accepted, documented exception (ADR-020) — not an open
+  defect. The exemption is a fixed list matched by exact colour, so new violations still fail CI.
 - Paystack runs in test mode only.
 
 ## Licence and credits

@@ -343,3 +343,181 @@ describe("CORS and headers", () => {
     expect(res.headers["x-request-id"]).toBeTruthy();
   });
 });
+
+describe("per-administrator dashboard sections (ADR-021)", () => {
+  /**
+   * The roles screen sends `{ "<adminUserId>": { dashboard: true, … } }`,
+   * not the PRD's role matrix. The frontend contract wins for this endpoint,
+   * so the body must round-trip — but it must not become authorisation.
+   */
+  const SECTIONS = {
+    dashboard: true,
+    users: true,
+    courses: false,
+    analytics: false,
+    payments: true,
+    announcements: true,
+    settings: false,
+  };
+
+  it("persists exactly the body the screen sends", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const target = await makeUser({ role: "admin", name: "Limited Admin" });
+
+    const res = await request(server)
+      .post("/admin/permissions")
+      .set(auth(admin))
+      .send({ permissions: { [String(target._id)]: SECTIONS } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.applied).toContain(String(target._id));
+
+    const stored = await User.findById(target._id);
+    expect(stored.admin_sections).toEqual(SECTIONS);
+  });
+
+  it("returns them on the admin users list, which is what the screen reads", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const target = await makeUser({ role: "admin", name: "Limited Admin" });
+
+    await request(server)
+      .post("/admin/permissions")
+      .set(auth(admin))
+      .send({ permissions: { [String(target._id)]: SECTIONS } });
+
+    const list = await request(server).get("/admin/users").set(auth(admin));
+    const row = list.body.find((u) => u.id === String(target._id));
+
+    expect(row.permissions).toEqual(SECTIONS);
+  });
+
+  it("defaults an administrator to every section", async () => {
+    const admin = await makeUser({ role: "admin" });
+
+    const list = await request(server).get("/admin/users").set(auth(admin));
+    const row = list.body.find((u) => u.id === String(admin._id));
+
+    expect(row.permissions).toEqual({
+      dashboard: true,
+      users: true,
+      courses: true,
+      analytics: true,
+      payments: true,
+      announcements: true,
+      settings: true,
+    });
+  });
+
+  it("does not attach sections to non-admin rows", async () => {
+    const admin = await makeUser({ role: "admin" });
+    await makeUser({ role: "instructor" });
+
+    const list = await request(server).get("/admin/users").set(auth(admin));
+    const instructor = list.body.find((u) => u.role === "instructor");
+
+    expect(instructor.permissions).toBeUndefined();
+  });
+
+  it("drops section keys the screen does not offer", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const target = await makeUser({ role: "admin" });
+
+    await request(server)
+      .post("/admin/permissions")
+      .set(auth(admin))
+      .send({
+        permissions: {
+          [String(target._id)]: { ...SECTIONS, secret_backdoor: true },
+        },
+      });
+
+    const stored = await User.findById(target._id);
+    expect(stored.admin_sections.secret_backdoor).toBeUndefined();
+    expect(stored.admin_sections).toEqual(SECTIONS);
+  });
+
+  it("ignores ids that are not administrators", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const parent = await makeUser({ role: "parent" });
+
+    const res = await request(server)
+      .post("/admin/permissions")
+      .set(auth(admin))
+      .send({ permissions: { [String(parent._id)]: SECTIONS } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ignored).toContain(String(parent._id));
+    expect(res.body.applied).toEqual([]);
+  });
+
+  it("never lets a section toggle change what a role may do", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const target = await makeUser({ role: "admin" });
+
+    // Turn every section off for this administrator.
+    await request(server)
+      .post("/admin/permissions")
+      .set(auth(admin))
+      .send({
+        permissions: {
+          [String(target._id)]: Object.fromEntries(
+            Object.keys(SECTIONS).map((k) => [k, false])
+          ),
+        },
+      });
+
+    // The role matrix is untouched, and the endpoints still answer: these are
+    // UI visibility toggles, not authorisation (ADR-021).
+    expect(can("admin", "users.manage")).toBe(true);
+    const stillWorks = await request(server)
+      .get("/admin/users")
+      .set(auth(target));
+    expect(stillWorks.status).toBe(200);
+  });
+
+  it("still accepts the role matrix on the same endpoint", async () => {
+    const admin = await makeUser({ role: "admin" });
+
+    const res = await request(server)
+      .post("/admin/permissions")
+      .set(auth(admin))
+      .send({ permissions: { "analytics.view": ["admin", "instructor"] } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.applied).toContain("analytics.view");
+    expect(can("instructor", "analytics.view")).toBe(true);
+
+    resetPermissions();
+  });
+
+  it("refuses a payload that mixes both shapes, rather than guessing", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const target = await makeUser({ role: "admin" });
+
+    const res = await request(server)
+      .post("/admin/permissions")
+      .set(auth(admin))
+      .send({
+        permissions: {
+          "analytics.view": ["admin"],
+          [String(target._id)]: SECTIONS,
+        },
+      });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("treats an unrecognised key as a matrix typo and reports it", async () => {
+    const admin = await makeUser({ role: "admin" });
+
+    const res = await request(server)
+      .post("/admin/permissions")
+      .set(auth(admin))
+      .send({ permissions: { "not-a-real-key": ["admin"] } });
+
+    // A typo is reported, not a 400 that loses the rest of the save.
+    expect(res.status).toBe(200);
+    expect(res.body.ignored).toContain("not-a-real-key");
+  });
+});

@@ -29,7 +29,10 @@ Tech logo and "Powered by StarNova Labs" attribution are in place.
 - **Seed** — the frontend's demo world: 2 admins, 2 instructors, 3 parents, 8 students on
   `KIT/26/001…`, consents, 3 cohorts, settings. Guarded against production.
 - **Brand** — `npm run brand` builds `public/brand/` from the master files; `KitLogo` and
-  `PoweredByStarNova`; app icons; the certificate carries both marks.
+  `PoweredByStarNova`; app icons; the certificate carries both marks. The sidebar and sign-in lockup
+  show the **full logotype**, which spells out the name and so replaces both the old bolt icon and the
+  wordmark that was set in type beside it; the collapsed sidebar uses the same logotype letterboxed
+  into a transparent square, with no tile behind it.
 - **Tests** — 315 server tests, 40 end-to-end (desktop + Pixel 7) with axe, and CI covering both
   packages plus a live end-to-end run.
 
@@ -75,32 +78,45 @@ against real data then found two **mock-id** assumptions the static sweep could 
 uses `--text-secondary` rather than the `--text-muted` the brand note asked for, because
 `--text-muted` fails AA in both themes.
 
-Nine colour pairings still fail AA and **need a brand decision** (ADR-020) — chiefly white on the
-emerald `#10B981` at 2.53:1 against the 4.5:1 small text requires. Reaching 4.5:1 needs roughly
-`#047857`, a visibly different green, which CLAUDE.md makes non-negotiable. The E2E assertion allows
-those pairs through by exact colour, per node, so any other serious or critical violation still fails
-the build. **This is the one acceptance criterion not fully met.**
+Nine colour pairings still fail AA. The product owner has decided the emerald palette stands, so these
+are an accepted, documented exception rather than an open defect (ADR-020). The E2E assertion allows
+exactly those pairs through, by exact colour and per node, so any other serious or critical violation
+still fails the build.
 
-**ADRs added** — ADR-009 to ADR-022. Two are open and need the client: **ADR-020** (palette contrast)
-and **ADR-021** (the permissions screen sends per-admin feature toggles, not the PRD's role matrix).
+**ADRs added** — ADR-009 to ADR-022, all **Accepted**. The two that were open were decided by the
+product owner on 23 October:
+
+- **ADR-020 — palette contrast.** Keep the emerald `#10B981` unchanged and carry the WCAG AA
+  shortfall as a documented exception. The exemption is a fixed list of nine colour pairs matched by
+  exact colour, per node, so any other violation still fails the build.
+- **ADR-021 — the permissions screen.** The frontend contract wins: `POST /admin/permissions` now
+  accepts and persists the per-administrator section toggles the screen sends, and `GET /admin/users`
+  returns them on each admin row. They are visibility only — enforcement stays with the role matrix,
+  and a test proves that turning every section off does not change what the account may do.
 
 **Deferred, with reasons**
 
 | Item | Why | When |
 |---|---|---|
-| Palette contrast | Needs a brand decision; not a developer's call | Batch 3, after the client chooses |
-| Per-administrator permissions | Needs a per-user permission model the PRD does not define | Batch 3 (FR19) |
 | Instructor narrowing on `/students/:id/progress` | Needs the enrolments collection | Batch 2 (ADR-014) |
 | `assign-instructor` writing to a course | No `courses` collection yet; intent is audited | Batch 2 (ADR-012) |
 | 76 React Compiler lint warnings | Rewriting them is the redesign the PRD forbids | Cosmetic; optional |
 | `token` alias on `/login` | Kept for shape compatibility with the mocks | Drop once Batch 3 confirms nothing reads it |
 | Lighthouse measurement | Needs the deployed URL | Batch 3 |
 
+**Limitations carried forward**
+
+- **Palette contrast (ADR-020, accepted).** Nine colour pairings fail WCAG AA, chiefly white on the
+  emerald `#10B981` at 2.53:1 where AA asks 4.5:1 of small text. This is an accepted brand exception,
+  not an outstanding defect: the product owner has decided the palette stands. Every violation that
+  did not require changing a colour is fixed. The exemption cannot grow silently — it is a fixed list
+  matched by exact colour pair, per node.
+- Batches 2 and 3 are not built; the screens that need them render empty states against endpoints
+  that return empty, correctly shaped data (ADR-018).
+- Paystack is test mode only.
+
 **Needs the student**
 
-1. **A brand decision on contrast** (ADR-020) — darken the emerald for small text, put navy text on
-   emerald instead of white, or reserve white-on-emerald for large/bold text only.
-2. A GitHub repository, so CI actually runs: `MubarakAliyu/KITOS-MERN` per the PRD.
-3. Accounts for Batch 3: MongoDB Atlas, Render, Vercel, Cloudinary, SMTP, Paystack test keys.
-4. Answers to PRD §17: the production domains, course fee amounts, a native-speaker pass on the Hausa
+1. Accounts for Batch 3: MongoDB Atlas, Render, Vercel, Cloudinary, SMTP, Paystack test keys.
+2. Answers to PRD §17: the production domains, course fee amounts, a native-speaker pass on the Hausa
    strings, and which KIT address sends mail.

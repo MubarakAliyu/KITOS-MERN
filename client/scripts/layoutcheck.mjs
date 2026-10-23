@@ -7,8 +7,9 @@
  *  1. The sign-in form's position with the attribution present must equal its
  *     position with the attribution removed — i.e. the footer does not push
  *     the form around.
- *  2. The logo slots must keep the exact dimensions the bolt icon had:
- *     40x40 in the auth lockup, 36x36 in the sidebar.
+ *  2. The logo now replaces the icon *and* the wordmark beside it, so its own
+ *     box is expected to change. What must not change is everything around
+ *     it: the sidebar nav's origin, and the form's position.
  */
 import { chromium } from "@playwright/test";
 
@@ -29,7 +30,7 @@ await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
 await page.waitForTimeout(1200);
 
 const withFooter = await rect("main > div");
-const lockup = await rect("main .grid.h-10.w-10");
+const lockup = await rect('main img[alt="Kids In Tech"]');
 
 // Remove the attribution and re-measure.
 await page.evaluate(() => {
@@ -46,7 +47,7 @@ console.log(
     ? `YES  dx=${withoutFooter.x - withFooter.x} dy=${withoutFooter.y - withFooter.y}`
     : "no"
 );
-console.log("auth logo slot:", JSON.stringify(lockup), lockup?.w === 40 && lockup?.h === 40 ? "(40x40 as before)" : "(CHANGED)");
+console.log("auth logotype box:", JSON.stringify(lockup));
 
 // Sidebar slot, after signing in.
 await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
@@ -57,14 +58,14 @@ await page.waitForURL((u) => !u.pathname.includes("/login"), { timeout: 30000 })
 await page.waitForTimeout(1500);
 
 const navBefore = await rect("aside nav");
-const slot = await rect("aside .grid.h-9.w-9");
+const slot = await rect('aside img[alt="Kids In Tech"]');
 await page.evaluate(() => {
   document.querySelector('aside a[aria-label="Powered by StarNova Labs"]')?.remove();
 });
 await page.waitForTimeout(300);
 const navAfter = await rect("aside nav");
 
-console.log("sidebar logo slot:", JSON.stringify(slot), slot?.w === 36 && slot?.h === 36 ? "(36x36 as before)" : "(CHANGED)");
+console.log("sidebar logotype box:", JSON.stringify(slot));
 console.log("sidebar nav, attribution present:", JSON.stringify(navBefore));
 console.log("sidebar nav, attribution removed:", JSON.stringify(navAfter));
 console.log(

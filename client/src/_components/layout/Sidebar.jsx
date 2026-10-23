@@ -198,21 +198,24 @@ function SidebarBody({ items, role, session, isCollapsed, onItemClick, onLogout 
     <div className="flex h-full flex-col overflow-hidden">
       {/* Logo block */}
       <div className="flex items-center gap-2.5 border-b border-[var(--sidebar-border)] px-3 py-4">
-        {/* The Kids In Tech logo replaces the lightning-bolt placeholder.
-            Same 36px square slot as before, so the header height and the
-            nav below it do not move. */}
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#0B1220] p-1 shadow-sm">
+        {/* The logotype carries the name itself, so it stands in for both the
+            old bolt icon and the "Kids In Tech" wordmark that sat beside it.
+            Collapsed, it falls back to the square mark — the same logo
+            letterboxed, with no tile behind it. The block keeps its 36px
+            content height either way, so the nav below does not move. */}
+        {isCollapsed ? (
           <KitLogo
             variant="mark"
-            className="h-full w-full object-contain"
+            className="h-9 w-9 shrink-0 object-contain"
             priority
           />
-        </div>
-        {!isCollapsed && (
+        ) : (
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate font-sans text-base font-bold text-[var(--text-primary)]">
-              Kids In Tech
-            </span>
+            <KitLogo
+              variant="full"
+              className="h-10 w-auto shrink-0 object-contain"
+              priority
+            />
             <span className="rounded-md bg-[#10B981] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white font-mono-ui">
               LMS
             </span>

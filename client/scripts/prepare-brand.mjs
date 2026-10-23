@@ -49,20 +49,13 @@ const STARNOVA_BRANDING = path.resolve(
 const KIT_LOGO = path.join(KIT_BRANDING, "kids logo.png");
 
 /**
- * The "<" bracket, cropped out of the wordmark for the collapsed sidebar.
+ * Padding around the square mark, as a fraction of the square.
  *
- * The full logotype is a 2.1:1 wordmark; squeezed into a 36px square slot it
- * is an unreadable smudge. The opening bracket is the brand's signature
- * device, stays legible at that size, and is unmistakably from this logo.
- *
- * The numbers are measured from the trimmed master, not guessed: the bracket
- * occupies the first 322 columns, and rows 57-486. There is no fully
- * transparent gutter between it and the "K" — the drop shadow bridges them —
- * so the column is chosen at the profile's minimum rather than at a zero.
+ * The mark is the whole logotype letterboxed into a transparent square, not a
+ * crop. An earlier version cropped the opening "<" bracket, on the reasoning
+ * that a 2.1:1 wordmark goes muddy in a 36px slot — but a lone chevron in a
+ * dark tile does not read as Kids In Tech at all, which is worse than small.
  */
-const BRACKET = { left: 0, top: 57, width: 322, height: 429 };
-
-/** Padding around the mark, as a fraction of the square, so it can breathe. */
 const MARK_PADDING = 0.08;
 
 async function buildKitLogo() {
@@ -84,13 +77,12 @@ async function buildKitLogo() {
   console.log(`  kit-logo.png        ${meta.width}x${meta.height}`);
 }
 
-/** The square bracket mark, at any size. */
+/** The square mark — the full logotype, letterboxed, at any size. */
 async function markBuffer(size) {
   const trimmed = await sharp(KIT_LOGO).trim({ threshold: 10 }).toBuffer();
   const pad = Math.round(size * MARK_PADDING);
 
   return sharp(trimmed)
-    .extract(BRACKET)
     .resize(size - pad * 2, size - pad * 2, {
       fit: "contain",
       background: { r: 0, g: 0, b: 0, alpha: 0 },
@@ -107,8 +99,11 @@ async function markBuffer(size) {
 }
 
 async function buildKitMark() {
-  await writeFile(path.join(BRAND_OUT, "kit-mark.png"), await markBuffer(128));
-  console.log("  kit-mark.png        128x128");
+  // 256, not 128: the collapsed sidebar renders it at 36px on a 2x or 3x
+  // screen, and a letterboxed wordmark has far less margin for softness than
+  // a single glyph did.
+  await writeFile(path.join(BRAND_OUT, "kit-mark.png"), await markBuffer(256));
+  console.log("  kit-mark.png        256x256");
 }
 
 async function buildAppIcons() {

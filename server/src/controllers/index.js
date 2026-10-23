@@ -5,6 +5,7 @@ import * as familyService from "../services/family.service.js";
 import * as settingsService from "../services/settings.service.js";
 import * as notificationService from "../services/notification.service.js";
 import { clientIp, logActivity } from "../lib/audit.js";
+import { badRequest } from "../lib/errors.js";
 import { dbStatus } from "../config/db.js";
 
 /**
@@ -176,10 +177,38 @@ export const getAdminStats = handle(async (_req, res) => {
 });
 
 export const postPermissions = handle(async (req, res) => {
-  // The permissions screen posts either `{ permissions: {…} }` or the matrix
-  // itself as the body.
-  const overrides = req.body.permissions ?? req.body;
-  const result = await settingsService.savePermissions(overrides);
+  // The screen posts `{ permissions: {…} }`; the matrix may also be posted
+  // as the body itself.
+  const payload = req.body.permissions ?? req.body;
+  const kind = settingsService.classifyPermissionsPayload(payload);
+
+  if (kind === "admin_sections") {
+    // What the roles-and-permissions screen actually sends (ADR-021):
+    // per-administrator dashboard sections.
+    const result = await settingsService.saveAdminSections(payload);
+
+    await logActivity({
+      actor: actorOf(req),
+      action: "updated_permissions",
+      description: `Updated dashboard sections for ${result.applied.length} administrator(s)`,
+      target_type: "admin_sections",
+      meta: { applied: result.applied, ignored: result.ignored },
+      ip: clientIp(req),
+    });
+
+    res.status(200).json({ success: true, ...result });
+    return;
+  }
+
+  if (kind === "mixed") {
+    throw badRequest(
+      "Unrecognised permissions payload",
+      "Send either role-matrix overrides keyed by permission name, or dashboard sections keyed by administrator id — not both at once"
+    );
+  }
+
+  // The PRD's role matrix — what the server actually enforces.
+  const result = await settingsService.savePermissions(payload);
 
   await logActivity({
     actor: actorOf(req),

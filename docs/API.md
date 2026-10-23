@@ -173,6 +173,8 @@ Returns a **bare array** — what the users table consumes (ADR-010).
 }]
 ```
 
+Rows for administrators also carry `permissions` — their dashboard section toggles (ADR-021).
+
 `status`, not `is_active`. `enrolled_courses` is empty until Batch 2. `password_hash`, `token_version`
 and the reset-token fields are never serialised anywhere.
 
@@ -261,7 +263,24 @@ Takes effect immediately, without a restart. Unknown permission keys and unknown
 `ignored` rather than stored, and an override can never strip `admin` from a permission it holds by
 default — a saved typo must not make the platform unadministrable.
 
-The retained settings screen sends a different shape (per-admin feature toggles); see ADR-021.
+**This endpoint also accepts the roles screen's own shape** (ADR-021) — per-administrator dashboard
+sections, keyed by admin user id:
+
+```json
+{ "permissions": { "6ada…": { "dashboard": true, "users": true, "courses": false,
+                              "analytics": false, "payments": true,
+                              "announcements": true, "settings": false } } }
+```
+
+→ `{ "success": true, "applied": ["6ada…"], "ignored": [] }`
+
+These control which sections that administrator sees and **are not authorisation**: what the account
+may do is decided solely by the role matrix, which they cannot widen or narrow. They come back on each
+administrator's row from `GET /admin/users` as `permissions`, defaulting to every section enabled.
+
+The two shapes are told apart by their keys — a permission key is a dotted name, an administrator id
+is 24 hex characters. A payload mixing both is refused rather than guessed at; an unrecognised key is
+treated as a mistyped matrix key and reported in `ignored`, so one typo cannot discard a valid save.
 
 ---
 

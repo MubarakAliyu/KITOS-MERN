@@ -84,3 +84,29 @@ export const CONSENT_SCOPES = [
   "progress_tracking",
   "communication",
 ];
+
+/**
+ * Admin dashboard sections an administrator can be given or denied, as the
+ * roles-and-permissions screen lists them (PERMISSION_KEYS in
+ * `client/src/app/(dashboard)/admin/settings/page.jsx`).
+ *
+ * These are **not** the role matrix in `config/permissions.js`. That matrix
+ * decides what a *role* may do and is what the server enforces; these are
+ * per-administrator visibility toggles for the admin UI (ADR-021). Keeping
+ * the two apart is deliberate: a navigation preference must never be mistaken
+ * for an authorisation decision.
+ */
+export const ADMIN_SECTIONS = [
+  "dashboard",
+  "users",
+  "courses",
+  "analytics",
+  "payments",
+  "announcements",
+  "settings",
+];
+
+/** Every section enabled — what a new administrator starts with. */
+export function defaultAdminSections() {
+  return Object.fromEntries(ADMIN_SECTIONS.map((key) => [key, true]));
+}

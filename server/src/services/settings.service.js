@@ -1,6 +1,9 @@
+import mongoose from "mongoose";
 import { Setting } from "../models/Setting.js";
+import { User } from "../models/User.js";
 import { applyOverrides, getMatrix } from "../config/permissions.js";
 import { logger } from "../lib/logger.js";
+import { ADMIN_SECTIONS } from "../config/constants.js";
 
 /** Stored `[{ key, roles }]` → the `{ key: roles }` shape the API speaks. */
 function overridesToObject(stored) {
@@ -60,6 +63,86 @@ export async function updateSettings(patch) {
 
   await doc.save();
   return getSettings();
+}
+
+/**
+ * Saves per-administrator dashboard section toggles (ADR-021).
+ *
+ * This is what the roles-and-permissions screen actually sends:
+ * `{ "<adminUserId>": { dashboard: true, users: false, … } }`. It controls
+ * which sections that administrator sees, and nothing else — authorisation
+ * stays with the role matrix, which this cannot touch. Unknown section keys
+ * and ids that are not active administrators are reported back rather than
+ * stored.
+ *
+ * @param {Record<string, Record<string, boolean>>} byUser
+ */
+export async function saveAdminSections(byUser) {
+  const applied = [];
+  const ignored = [];
+
+  for (const [userId, sections] of Object.entries(byUser ?? {})) {
+    if (!mongoose.isValidObjectId(userId) || typeof sections !== "object" || sections === null) {
+      ignored.push(userId);
+      continue;
+    }
+
+    const admin = await User.findOne({ _id: userId, role: "admin" }).select("_id");
+    if (!admin) {
+      ignored.push(userId);
+      continue;
+    }
+
+    // Keep only the sections the UI actually offers, coerced to booleans, so
+    // a stray key cannot accumulate on the document.
+    const cleaned = {};
+    for (const key of ADMIN_SECTIONS) {
+      if (key in sections) cleaned[key] = Boolean(sections[key]);
+    }
+
+    if (Object.keys(cleaned).length === 0) {
+      ignored.push(userId);
+      continue;
+    }
+
+    await User.updateOne({ _id: admin._id }, { $set: { admin_sections: cleaned } });
+    applied.push(userId);
+  }
+
+  if (ignored.length > 0) {
+    logger.warn({ ignored }, "Ignored unknown ids while saving admin sections");
+  }
+
+  return { applied, ignored };
+}
+
+/**
+ * Decides which of the two shapes a permissions payload is in.
+ *
+ * The endpoint serves two callers with the same name for different things:
+ * the PRD's role matrix (`{ "users.manage": ["admin"] }`) and the roles
+ * screen's per-administrator toggles (`{ "<id>": { dashboard: true } }`).
+ * Telling them apart by their keys is unambiguous — a permission key is a
+ * dotted name from a fixed list, an id is 24 hex characters — and avoids
+ * making the client send a discriminator it does not currently send.
+ */
+export function classifyPermissionsPayload(payload) {
+  const keys = Object.keys(payload ?? {});
+  if (keys.length === 0) return "empty";
+
+  const ids = keys.filter((key) => mongoose.isValidObjectId(key));
+
+  // Every key an id: the roles screen's per-administrator sections.
+  if (ids.length === keys.length) return "admin_sections";
+
+  // Some but not all: genuinely ambiguous, and far more likely a bug in the
+  // caller than an intent worth guessing at.
+  if (ids.length > 0) return "mixed";
+
+  // Otherwise treat it as the role matrix. Deliberately not "every key must
+  // be a known permission": a single mistyped key should be reported in
+  // `ignored` alongside the ones that applied, not reject the whole save.
+  return "matrix";
 }
 
 /**

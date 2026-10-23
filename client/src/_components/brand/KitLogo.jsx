@@ -6,10 +6,11 @@ import Image from "next/image";
  * Replaces the lightning-bolt placeholder that stood in for the brand while
  * the frontend was built (PRD §12.3). Two variants:
  *
- *   full  the wordmark, for an expanded sidebar and the sign-in lockup
- *   mark  the square "<" bracket, for the collapsed sidebar and anywhere
- *         else the slot is square — the wordmark is 2.1:1 and turns to mush
- *         below about 80px wide
+ *   full  the logotype, for an expanded sidebar and the sign-in lockup. It
+ *         spells out the name, so it stands in for the wordmark that used to
+ *         be set in type beside the icon.
+ *   mark  the same logotype letterboxed into a transparent square, for the
+ *         collapsed sidebar and the app icons
  *
  * Both files come from `scripts/prepare-brand.mjs`. Width and height are the
  * assets' intrinsic sizes so Next.js can reserve the space and nothing shifts
@@ -25,8 +26,8 @@ export default function KitLogo({
       <Image
         src="/brand/kit-mark.png"
         alt="Kids In Tech"
-        width={128}
-        height={128}
+        width={256}
+        height={256}
         priority={priority}
         className={className}
       />
