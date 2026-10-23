@@ -160,7 +160,7 @@ In `client/`: `npm run brand` rebuilds `public/brand/` from the master logo file
 ## Testing
 
 ```bash
-npm test                              # 315 server tests
+npm test                              # 325 server tests
 npm --prefix client run test:e2e      # smoke + axe, desktop and Pixel 7
 ```
 

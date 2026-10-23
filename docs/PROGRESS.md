@@ -3,8 +3,8 @@
 | Batch | Branch | Status | Date | Notes |
 |---|---|---|---|---|
 | Docs | main | ✅ Done | 17 Oct 2026 | Project report (Ch. 1–5), PRD, CLAUDE.md, LAB-PHASES, ADR-001–008, batch prompts |
-| 1 — Backend foundation, identity and brand | batch/01-foundation | ✅ Done | 23 Oct 2026 | Express 5 + MongoDB API, 8 models, 33 endpoints, 315 server tests, Playwright + axe, CI, KIT logo and StarNova attribution |
-| 2 — Learning core and hybrid sessions | batch/02-learning-sessions | ⏳ Not started | | |
+| 1 — Backend foundation, identity and brand | batch/01-foundation | ✅ Done | 23 Oct 2026 | Express 5 + MongoDB API, 8 models, 33 endpoints, 325 server tests, Playwright + axe, CI, KIT logo and StarNova attribution |
+| 2 — Learning core and hybrid sessions | batch/02-learning-sessions | 🚧 In progress | | |
 | 3 — Real-time, payments, admin and deployment | batch/03-realtime-payments-deploy | ⏳ Not started | | |
 
 ## Log
@@ -33,7 +33,7 @@ Tech logo and "Powered by StarNova Labs" attribution are in place.
   show the **full logotype**, which spells out the name and so replaces both the old bolt icon and the
   wordmark that was set in type beside it; the collapsed sidebar uses the same logotype letterboxed
   into a transparent square, with no tile behind it.
-- **Tests** — 315 server tests, 40 end-to-end (desktop + Pixel 7) with axe, and CI covering both
+- **Tests** — 325 server tests, 40 end-to-end (desktop + Pixel 7) with axe, and CI covering both
   packages plus a live end-to-end run.
 
 **Baseline before any change** — `npm run build` in `client/` passed on the untouched copy, 42 routes.
@@ -43,8 +43,8 @@ Tech logo and "Powered by StarNova Labs" attribution are in place.
 **How to run it** — see [the README](../README.md). Three terminals: `npm run db:local`, `npm run seed`,
 `npm run dev`.
 
-**Tests** — `npm test` → 315 passing across 5 files (auth 30, permissions 205, admin 29, family 22,
-validation 29). `npm --prefix client run test:e2e` → 40 passing across two device profiles.
+**Tests** — `npm test` → 325 passing across 5 files (auth 30, permissions 205, admin 29, family 22,
+validation 39). `npm --prefix client run test:e2e` → 40 passing across two device profiles.
 
 **Endpoints covered** — 33 of roughly 70 in the frontend's contract. Every Batch 1 endpoint in PRD §9.1
 and §9.2, plus the notification reads brought forward (ADR-019). Documented in
@@ -117,6 +117,8 @@ product owner on 23 October:
 
 **Needs the student**
 
-1. Accounts for Batch 3: MongoDB Atlas, Render, Vercel, Cloudinary, SMTP, Paystack test keys.
-2. Answers to PRD §17: the production domains, course fee amounts, a native-speaker pass on the Hausa
+1. **Create the GitHub repository and push** — the remote `MubarakAliyu/KITOS-MERN` does not exist yet
+   and `gh` is not authenticated here, so CI has never run. Commands are in the Batch 1 hand-off.
+2. Accounts for Batch 3: MongoDB Atlas, Render, Vercel, Cloudinary, SMTP, Paystack test keys.
+3. Answers to PRD §17: the production domains, course fee amounts, a native-speaker pass on the Hausa
    strings, and which KIT address sends mail.
