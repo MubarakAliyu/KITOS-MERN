@@ -251,7 +251,7 @@ export async function runSeed({ quiet = false } = {}) {
 
   // ── Settings ─────────────────────────────────────────────────────────────
   say("Writing platform settings…");
-  await Setting.create({ key: "platform", ...SETTINGS, permissions: {} });
+  await Setting.create({ key: "platform", ...SETTINGS, permissions: [] });
 
   // ── Audit ────────────────────────────────────────────────────────────────
   await ActivityLog.create({

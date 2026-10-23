@@ -25,8 +25,15 @@ export default function PoweredByStarNova({
   ink = "auto",
   className = "",
 }) {
+  // --text-secondary, not --text-muted.
+  //
+  // The brand note asked for --text-muted, but that token fails WCAG AA
+  // against the sidebar in both themes (#9ca3af on white is 2.5:1, #6b7280 on
+  // #0f1729 is 3.7:1, against the 4.5:1 small text needs). --text-secondary is
+  // the next step up, reads as the same quiet grey, and passes in both
+  // (4.83:1 and about 7:1). A credit nobody can read serves nobody.
   const label = (
-    <span className="font-mono-ui text-[10px] font-normal uppercase tracking-[0.14em] text-[var(--text-muted)]">
+    <span className="font-mono-ui text-[10px] font-normal uppercase tracking-[0.14em] text-[var(--text-secondary)]">
       Powered by
     </span>
   );
@@ -41,9 +48,7 @@ export default function PoweredByStarNova({
       rel="noopener noreferrer"
       aria-label="Powered by StarNova Labs"
       title={collapsed ? "Powered by StarNova Labs" : undefined}
-      className={`group flex flex-col items-center gap-1 rounded-lg py-2 transition-opacity hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#10B981] ${
-        collapsed ? "opacity-70" : "opacity-80"
-      } ${className}`}
+      className={`group flex flex-col items-center gap-1 rounded-lg py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#10B981] ${className}`}
     >
       {collapsed ? (
         <Image
@@ -56,6 +61,7 @@ export default function PoweredByStarNova({
       ) : ink === "dark" ? (
         <>
           {/* Always-light surface: force the dark wordmark. */}
+          {/* #6B7280 on the always-white auth panel is 4.83:1. */}
           <span className="font-mono-ui text-[10px] font-normal uppercase tracking-[0.14em] text-[#6B7280]">
             Powered by
           </span>

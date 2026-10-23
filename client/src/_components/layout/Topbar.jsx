@@ -127,7 +127,10 @@ export default function Topbar() {
         <button
           type="button"
           onClick={() => router.push(settingsHref)}
-          aria-label="Language preference"
+          // The visible text is the language code, so it has to appear in
+          // the accessible name too (WCAG 2.5.3, Label in Name) — otherwise
+          // someone using voice control cannot say what they can see.
+          aria-label={`${t("settings.languagePreference")}: ${(languagePreference || "en").toUpperCase()}`}
           title={t("settings.languagePreference")}
           className="rounded-full bg-[var(--bg-secondary)] px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] font-mono-ui"
         >
@@ -144,7 +147,14 @@ export default function Topbar() {
               setUserOpen(false);
               setNotifOpen((v) => !v);
             }}
-            aria-label="Notifications"
+            // The badge caps at "9+", so the accessible name has to use the
+            // same text: WCAG 2.5.3 wants the visible label inside the
+            // accessible name, and "16" is not what the user can see.
+            aria-label={
+              unreadCount > 0
+                ? `Notifications, ${unreadCount > 9 ? "9+" : unreadCount} unread`
+                : "Notifications"
+            }
             aria-expanded={notifOpen}
             className="relative grid h-9 w-9 place-items-center rounded-full text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
           >
