@@ -110,3 +110,41 @@ export const ADMIN_SECTIONS = [
 export function defaultAdminSections() {
   return Object.fromEntries(ADMIN_SECTIONS.map((key) => [key, true]));
 }
+
+/**
+ * How much each kind of item counts toward course progress (FR10).
+ *
+ * Equal weights today, which matches what the legacy API did and what the
+ * mock fixtures imply. They live here as one constant so the balance can be
+ * retuned — "a quiz is worth three lessons" — without touching the queries
+ * that count them.
+ */
+export const PROGRESS_WEIGHTS = {
+  lesson: 1,
+  quiz: 1,
+  assignment: 1,
+};
+
+/**
+ * The mark a quiz must reach to count toward progress.
+ *
+ * The legacy API counted a quiz as done merely for having been attempted, so
+ * a child could score 10% and still complete the course and collect a
+ * certificate. A certificate should mean something.
+ */
+export const QUIZ_PASS_PERCENTAGE = 50;
+
+/** Session modes (PRD §8.2). */
+export const SESSION_MODES = ["online", "physical", "hybrid"];
+
+/** How attendance was captured. */
+export const ATTENDANCE_METHODS = ["roster", "qr", "auto"];
+
+/** Attendance states an instructor can record. */
+export const ATTENDANCE_STATUSES = ["present", "absent", "late", "excused"];
+
+/** Where a recording is hosted. */
+export const RECORDING_SOURCES = ["youtube", "drive", "other"];
+
+/** A QR check-in token is good for 60 seconds (PRD §9.4). */
+export const QR_TOKEN_TTL_SECONDS = 60;
