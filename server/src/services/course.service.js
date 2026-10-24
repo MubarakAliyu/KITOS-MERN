@@ -12,7 +12,7 @@ import { Student } from "../models/Student.js";
 import { User } from "../models/User.js";
 import { notFound, forbidden, badRequest } from "../lib/errors.js";
 import { searchRegex } from "../lib/pagination.js";
-import { koboToNaira, nairaToKobo } from "../lib/serialize.js";
+import { koboToNaira, nairaToKobo, avatarInitial } from "../lib/serialize.js";
 import { sanitizeLessonHtml, toPlainText } from "../lib/sanitizeContent.js";
 import { toTrackSlug, toTrackLabel } from "../config/constants.js";
 import { recalculateCourse, progressBreakdown } from "./progress.service.js";
@@ -721,12 +721,19 @@ export async function listInstructorCourses(user) {
 }
 
 /**
- * `GET /instructors/me/students` — every student on the instructor's courses,
- * with their progress and last activity.
+ * `GET /instructors/me/students` — every student on the instructor's courses.
+ *
+ * **One row per student, not per enrolment.** The students table keys on the
+ * student id and filters with `enrolled_courses.includes(courseId)`, so a
+ * pupil taking two of an instructor's courses must appear once with both
+ * course ids, not twice. Returning a row per enrolment gave React duplicate
+ * keys and crashed the detail panel.
+ *
+ * The row carries everything both the table and the detail panel read, so
+ * opening a pupil needs no second request.
  */
 export async function listInstructorStudents(user) {
-  const courseFilter =
-    user.role === "admin" ? {} : { instructor_id: user._id };
+  const courseFilter = user.role === "admin" ? {} : { instructor_id: user._id };
   const courses = await Course.find(courseFilter).select("title");
   if (courses.length === 0) return [];
 
@@ -739,40 +746,145 @@ export async function listInstructorStudents(user) {
   });
   if (enrollments.length === 0) return [];
 
-  const students = await Student.find({
-    _id: { $in: enrollments.map((e) => e.student_id) },
-  });
-  const studentById = new Map(students.map((s) => [String(s._id), s]));
+  const studentIds = [...new Set(enrollments.map((e) => String(e.student_id)))];
+
+  const [students, attempts, submissions, assignments] = await Promise.all([
+    Student.find({ _id: { $in: studentIds } }),
+    QuizAttempt.find({
+      student_id: { $in: studentIds },
+      course_id: { $in: courseIds },
+    }),
+    Submission.find({
+      student_id: { $in: studentIds },
+      course_id: { $in: courseIds },
+    }),
+    Assignment.find({ course_id: { $in: courseIds } }),
+  ]);
 
   const accounts = await User.find({
     _id: { $in: students.map((s) => s.user_id) },
   }).select("admission_no last_login_at");
   const accountById = new Map(accounts.map((a) => [String(a._id), a]));
 
-  return enrollments
-    .map((enrollment) => {
-      const student = studentById.get(String(enrollment.student_id));
-      if (!student) return null;
-      const account = accountById.get(String(student.user_id));
+  // Quiz titles, for the detail panel's per-quiz list.
+  const quizzes = await Quiz.find({
+    _id: { $in: attempts.map((a) => a.quiz_id) },
+  }).select("title");
+  const quizTitle = new Map(quizzes.map((q) => [String(q._id), q.title]));
 
-      return {
-        id: String(student._id),
-        student_id: String(student._id),
-        name: student.name,
-        admission_no: account?.admission_no ?? null,
-        age: student.age,
-        programme_track: toTrackLabel(student.programme_track),
+  const assignmentTitle = new Map(
+    assignments.map((a) => [String(a._id), a.title])
+  );
+
+  // Group everything by student, once, rather than filtering inside a loop.
+  const byStudent = new Map();
+  const ensure = (id) => {
+    if (!byStudent.has(id)) {
+      byStudent.set(id, {
+        enrolments: [],
+        attempts: [],
+        submissions: [],
+      });
+    }
+    return byStudent.get(id);
+  };
+
+  for (const enrollment of enrollments) {
+    ensure(String(enrollment.student_id)).enrolments.push(enrollment);
+  }
+  for (const attempt of attempts) {
+    ensure(String(attempt.student_id)).attempts.push(attempt);
+  }
+  for (const submission of submissions) {
+    ensure(String(submission.student_id)).submissions.push(submission);
+  }
+
+  return students.map((student) => {
+    const key = String(student._id);
+    const bucket = byStudent.get(key) ?? {
+      enrolments: [],
+      attempts: [],
+      submissions: [],
+    };
+    const account = accountById.get(String(student.user_id));
+
+    const enrolledCourseIds = bucket.enrolments.map((e) => String(e.course_id));
+
+    const quizRows = bucket.attempts.map((attempt) => ({
+      id: String(attempt.quiz_id),
+      title: quizTitle.get(String(attempt.quiz_id)) ?? "Quiz",
+      score: attempt.percentage,
+    }));
+
+    const quizAverage = quizRows.length
+      ? Math.round(
+          quizRows.reduce((sum, q) => sum + q.score, 0) / quizRows.length
+        )
+      : 0;
+
+    const submittedIds = new Set(
+      bucket.submissions.map((s) => String(s.assignment_id))
+    );
+
+    // Pending means: set on a course this pupil is taking, not yet handed in.
+    const theirAssignments = assignments.filter((a) =>
+      enrolledCourseIds.includes(String(a.course_id))
+    );
+
+    const completedAssignments = bucket.submissions.map((submission) => ({
+      id: String(submission.assignment_id),
+      title:
+        assignmentTitle.get(String(submission.assignment_id)) ?? "Assignment",
+      status: submission.status,
+      grade: submission.grade ?? null,
+    }));
+
+    const pendingAssignments = theirAssignments
+      .filter((a) => !submittedIds.has(String(a._id)))
+      .map((a) => ({
+        id: String(a._id),
+        title: a.title,
+        deadline: a.deadline ? a.deadline.toISOString().slice(0, 10) : null,
+      }));
+
+    // The most recent activity across their enrolments.
+    const lastActivity = bucket.enrolments
+      .map((e) => e.last_activity_at)
+      .filter(Boolean)
+      .sort((a, b) => b - a)[0];
+
+    return {
+      id: key,
+      student_id: key,
+      name: student.name,
+      avatar_initial: avatarInitial(student.name),
+      admission_no: account?.admission_no ?? null,
+      age: student.age,
+      programme_track: toTrackLabel(student.programme_track),
+
+      // Course **ids**: the table's filter does enrolled_courses.includes(id).
+      enrolled_courses: enrolledCourseIds,
+      enrolled_courses_details: bucket.enrolments.map((enrollment) => ({
         course_id: String(enrollment.course_id),
         course_title: titleById.get(String(enrollment.course_id)) ?? null,
         progress: enrollment.progress,
         status: enrollment.status,
-        last_active:
-          enrollment.last_activity_at?.toISOString() ??
-          account?.last_login_at?.toISOString() ??
-          null,
-      };
-    })
-    .filter(Boolean);
+      })),
+
+      quizzes: quizRows,
+      quiz_average: quizAverage,
+
+      assignments_completed: completedAssignments.length,
+      assignments_pending: pendingAssignments.length,
+      completed_assignments: completedAssignments,
+      pending_assignments: pendingAssignments,
+
+      last_active:
+        lastActivity?.toISOString() ??
+        account?.last_login_at?.toISOString() ??
+        null,
+    };
+  });
 }
 
 /** The per-course progress feed the parent dashboard reads. */

@@ -2,18 +2,35 @@
 
 import { io } from "socket.io-client";
 
-const SOCKET_URL =
-  process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001";
+/**
+ * The Socket.IO endpoint. Chat arrives in Batch 3; until the server exists,
+ * leave `NEXT_PUBLIC_SOCKET_URL` unset and nothing dials out.
+ *
+ * Dialling an endpoint that is not there is not free: the browser itself logs
+ * a failed WebSocket handshake as a console error, which no application code
+ * can suppress — `connect_error` fires afterwards, too late. Every chat
+ * surface already falls back to local state with an "Offline mode" banner, so
+ * not connecting is the same experience without the noise.
+ */
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || null;
 
 let socketInstance = null;
 
+/** True when a Socket.IO endpoint is configured. */
+export function isRealtimeConfigured() {
+  return Boolean(SOCKET_URL);
+}
+
 /**
- * Lazy singleton socket. The dev server isn't running by default — every
- * dashboard chat page falls back to optimistic local updates and the
- * Topbar+ChatWindow show an "Offline mode" banner. The connect attempt is
- * non-fatal: connect_error logs at debug level only.
+ * Lazy singleton socket, or **null** when no endpoint is configured.
+ *
+ * Callers must handle null — `socket?.connect()` and so on. Returning a dead
+ * socket object instead would hide the fact that realtime is off and leave
+ * the UI claiming to be connected.
  */
 export function getSocket(token) {
+  if (!SOCKET_URL) return null;
+
   if (!socketInstance) {
     socketInstance = io(SOCKET_URL, {
       autoConnect: false,
@@ -24,10 +41,7 @@ export function getSocket(token) {
     });
 
     socketInstance.on("connect_error", (err) => {
-      console.debug(
-        "Socket connect error (expected in dev):",
-        err?.message ?? err
-      );
+      console.debug("Socket connect error:", err?.message ?? err);
     });
   }
   return socketInstance;
