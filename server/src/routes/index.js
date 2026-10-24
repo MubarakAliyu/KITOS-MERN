@@ -14,6 +14,7 @@ import {
 } from "../middleware/rateLimit.js";
 import * as s from "../validators/schemas.js";
 import { placeholderRouter } from "./placeholders.js";
+import { learningRouter } from "./learning.js";
 
 /**
  * Every Batch 1 route.
@@ -296,6 +297,9 @@ router.post(
   c.postSendNotification
 );
 
-// ── Batch 2 and 3 placeholders ──────────────────────────────────────────────
+// ── Batch 2: learning, assessment, certificates and sessions ────────────────
+router.use(learningRouter);
+
+// ── Batch 3 placeholders ────────────────────────────────────────────────────
 // Registered last so a real route above always wins. See routes/placeholders.js.
 router.use(placeholderRouter);
