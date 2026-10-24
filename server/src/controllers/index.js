@@ -260,18 +260,11 @@ export const getInstructorMe = handle(async (req, res) => {
   res.status(200).json(familyService.getInstructorProfile(req.user));
 });
 
-/**
- * Courses and students for an instructor arrive in Batch 2. Empty arrays
- * rather than 404s, so the dashboard shows its empty state instead of an
- * error (AC1.1).
+/*
+ * An instructor's courses and students are served by the Batch 2 learning
+ * router now; the Batch 1 stubs that returned empty arrays are gone, because
+ * they were registered first and shadowed the real implementations.
  */
-export const getInstructorCourses = handle(async (_req, res) => {
-  res.status(200).json([]);
-});
-
-export const getInstructorStudents = handle(async (_req, res) => {
-  res.status(200).json([]);
-});
 
 // ── Platform settings ───────────────────────────────────────────────────────
 

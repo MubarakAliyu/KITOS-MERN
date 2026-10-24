@@ -53,6 +53,64 @@ export function assertCanEditCourse(course, user) {
   );
 }
 
+/**
+ * May this user read the course's content?
+ *
+ * The matrix grants `content.read` to students "(enrolled)", and this is
+ * where that qualifier is enforced. Two separate rules, both needed:
+ *
+ *   - a draft course is invisible to students, however they came by the id —
+ *     half-written lessons are not for children;
+ *   - a published course's content is for the pupils taking it.
+ *
+ * Staff are unrestricted here; an instructor editing someone else's course is
+ * a different question, answered by `assertCanEditCourse`.
+ */
+export async function assertCanReadContent(course, user) {
+  if (user.role === "admin" || user.role === "instructor") return;
+
+  if (course.status !== "published") {
+    // Deliberately a 404, not a 403: confirming that a draft exists is itself
+    // a small leak of what the school is preparing.
+    throw notFound("Course not found");
+  }
+
+  if (user.role === "student") {
+    const student = await studentFor(user);
+    if (!student) throw forbidden("This course is not available to you");
+
+    const enrolled = await Enrollment.exists({
+      student_id: student._id,
+      course_id: course._id,
+      status: { $in: ["active", "completed"] },
+    });
+    if (!enrolled) {
+      throw forbidden(
+        "You are not enrolled on this course",
+        "Ask an administrator to enrol you to see its lessons"
+      );
+    }
+    return;
+  }
+
+  if (user.role === "parent") {
+    const children = await Student.find({ parent_id: user._id }).select("_id");
+    if (children.length === 0) {
+      throw forbidden("This course is not available to you");
+    }
+    const enrolled = await Enrollment.exists({
+      student_id: { $in: children.map((c) => c._id) },
+      course_id: course._id,
+      status: { $in: ["active", "completed"] },
+    });
+    if (!enrolled) {
+      throw forbidden(
+        "None of your children are enrolled on this course"
+      );
+    }
+  }
+}
+
 /** The course, or a 404. */
 export async function getCourseOrFail(courseId) {
   const course = await Course.findById(courseId);
@@ -197,7 +255,8 @@ export async function listCourses({ user, query = {} }) {
  * asking student.
  */
 export async function listCourseModules({ user, courseId }) {
-  await getCourseOrFail(courseId);
+  const course = await getCourseOrFail(courseId);
+  await assertCanReadContent(course, user);
 
   const [modules, lessons, quizzes, assignments] = await Promise.all([
     Module.find({ course_id: courseId }).sort({ order_index: 1 }),
@@ -271,6 +330,9 @@ export async function listModuleLessons({ user, moduleId }) {
   const module = await Module.findById(moduleId);
   if (!module) throw notFound("Module not found");
 
+  const course = await getCourseOrFail(module.course_id);
+  await assertCanReadContent(course, user);
+
   const lessons = await Lesson.find({ module_id: moduleId }).sort({
     order_index: 1,
   });
@@ -303,10 +365,8 @@ export async function getLesson({ user, lessonId }) {
     Course.findById(lesson.course_id).select("title status"),
   ]);
 
-  // A draft course is not readable by a student, however they reached the id.
-  if (user.role === "student" && course?.status !== "published") {
-    throw forbidden("This lesson is not available yet");
-  }
+  // The same rule as the module list: published, and enrolled.
+  if (course) await assertCanReadContent(course, user);
 
   const student = await studentFor(user);
   let completed = false;

@@ -233,20 +233,6 @@ router.get(
   c.getInstructorMe
 );
 
-router.get(
-  "/instructors/me/courses",
-  authenticate,
-  requireRole("instructor", "admin"),
-  c.getInstructorCourses
-);
-
-router.get(
-  "/instructors/me/students",
-  authenticate,
-  requireRole("instructor", "admin"),
-  c.getInstructorStudents
-);
-
 // ── Platform settings ───────────────────────────────────────────────────────
 
 /** Readable by any signed-in user — the UI reads the platform name and logo. */
