@@ -349,6 +349,90 @@ describe("lesson completion", () => {
   });
 });
 
+/**
+ * Finishing on something other than a lesson.
+ *
+ * `justCompleted` is a one-shot edge, so a path that recalculated progress
+ * without issuing did not merely delay the certificate — the enrolment
+ * flipped to "completed", the edge never fired again, and the child's
+ * certificate was lost for good.
+ */
+describe("the last piece of work is not always a lesson", () => {
+  it("issues the certificate when a quiz finishes the course", async () => {
+    const { course, lessons, quiz } = await makeCourse({ lessons: 1, withQuiz: true });
+    const { student, childUser } = await makeFamily();
+    await enrol(student, course);
+
+    await request(server)
+      .post(`/lessons/${lessons[0]._id}/complete`)
+      .set(auth(childUser));
+    expect(await Certificate.countDocuments({})).toBe(0);
+
+    const res = await request(server)
+      .post("/quiz/submit")
+      .set(auth(childUser))
+      .send({
+        quiz_id: String(quiz._id),
+        answers: {
+          [String(quiz.questions[0]._id)]: "4",
+          [String(quiz.questions[1]._id)]: "False",
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.course_completed).toBe(true);
+    expect(await Certificate.countDocuments({ course_id: course._id })).toBe(1);
+  });
+
+  it("issues the certificate when an assignment finishes the course", async () => {
+    const { course, lessons, assignment } = await makeCourse({
+      lessons: 1,
+      withAssignment: true,
+    });
+    const { student, childUser } = await makeFamily();
+    await enrol(student, course);
+
+    await request(server)
+      .post(`/lessons/${lessons[0]._id}/complete`)
+      .set(auth(childUser));
+    expect(await Certificate.countDocuments({})).toBe(0);
+
+    const res = await request(server)
+      .post("/assignments/submit")
+      .set(auth(childUser))
+      .send({
+        assignment_id: String(assignment._id),
+        submission_type: "link",
+        link: "https://scratch.mit.edu/projects/1",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.course_completed).toBe(true);
+    expect(await Certificate.countDocuments({ course_id: course._id })).toBe(1);
+  });
+
+  it("does not issue one for a course that is still unfinished", async () => {
+    const { course, quiz } = await makeCourse({ lessons: 2, withQuiz: true });
+    const { student, childUser } = await makeFamily();
+    await enrol(student, course);
+
+    const res = await request(server)
+      .post("/quiz/submit")
+      .set(auth(childUser))
+      .send({
+        quiz_id: String(quiz._id),
+        answers: {
+          [String(quiz.questions[0]._id)]: "4",
+          [String(quiz.questions[1]._id)]: "False",
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.course_completed).toBe(false);
+    expect(await Certificate.countDocuments({ course_id: course._id })).toBe(0);
+  });
+});
+
 describe("certificates", () => {
   it("issuing twice returns the same certificate", async () => {
     const { course } = await makeCourse({ lessons: 1 });

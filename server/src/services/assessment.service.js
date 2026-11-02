@@ -12,7 +12,8 @@ import { toPlainText } from "../lib/sanitizeContent.js";
 import { checkPositiveLanguage } from "../lib/positiveLanguage.js";
 import { QUIZ_PASS_PERCENTAGE } from "../config/constants.js";
 import { assertCanEditCourse, getCourseOrFail } from "./course.service.js";
-import { recalculateProgress, recalculateCourse } from "./progress.service.js";
+import { recalculateCourse } from "./progress.service.js";
+import { recalculateAndCertify } from "./enrollment.service.js";
 import { storage } from "../lib/storage.js";
 
 /**
@@ -260,7 +261,7 @@ export async function submitQuiz({ user, quizId, answers }) {
     });
   }
 
-  const { justCompleted } = await recalculateProgress({
+  const { justCompleted } = await recalculateAndCertify({
     studentId: student._id,
     courseId: quiz.course_id,
     touchActivity: true,
@@ -502,7 +503,7 @@ export async function submitAssignment({ user, payload }) {
     { new: true, upsert: true, setDefaultsOnInsert: true }
   );
 
-  const { justCompleted } = await recalculateProgress({
+  const { justCompleted } = await recalculateAndCertify({
     studentId: student._id,
     courseId: assignment.course_id,
     touchActivity: true,

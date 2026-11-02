@@ -131,19 +131,11 @@ export async function completeLesson({ user, lessonId }) {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  const { justCompleted, breakdown } = await recalculateProgress({
+  const { justCompleted, breakdown, certificate } = await recalculateAndCertify({
     studentId: student._id,
     courseId: lesson.course_id,
     touchActivity: true,
   });
-
-  let certificate = null;
-  if (justCompleted) {
-    certificate = await issueCertificate({
-      studentId: student._id,
-      courseId: lesson.course_id,
-    });
-  }
 
   return {
     success: true,
@@ -151,6 +143,37 @@ export async function completeLesson({ user, lessonId }) {
     course_completed: justCompleted,
     certificate: certificate ? serializeCertificate(certificate) : null,
   };
+}
+
+/**
+ * Recalculates progress and, if this is the moment the course was finished,
+ * issues the certificate.
+ *
+ * Every path that can be a child's last piece of work must come through here.
+ * `justCompleted` is a one-shot edge: once the enrolment reads "completed" it
+ * never fires again, so a caller that recalculates without issuing does not
+ * merely delay the certificate — it loses it for good. A pupil who finishes
+ * on a quiz or an assignment earned theirs exactly as much as one who
+ * finished on a lesson.
+ */
+export async function recalculateAndCertify({
+  studentId,
+  courseId,
+  session,
+  touchActivity = false,
+}) {
+  const result = await recalculateProgress({
+    studentId,
+    courseId,
+    session,
+    touchActivity,
+  });
+
+  const certificate = result.justCompleted
+    ? await issueCertificate({ studentId, courseId })
+    : null;
+
+  return { ...result, certificate };
 }
 
 /**
