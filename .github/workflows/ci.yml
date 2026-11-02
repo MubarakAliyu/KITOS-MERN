@@ -112,6 +112,13 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          # This job installs both packages, and there is no lockfile at the
+          # repository root — the root package.json only holds convenience
+          # scripts. Without naming both, setup-node looks for a root lockfile,
+          # finds none and fails the job before anything runs.
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
 
       - name: Install the server
         working-directory: server
