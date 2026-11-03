@@ -263,8 +263,11 @@ test.describe("the hybrid session journey", () => {
     expect(scheduled.status).toBe("scheduled");
 
     // ── The child sees it coming ────────────────────────────────────────────
+    // The screen opens on Live, which is right for a child arriving at class
+    // time; a class that has not started yet is under Upcoming.
     await switchTo(page, "student");
     await page.goto("/student/sessions");
+    await page.getByRole("button", { name: /upcoming/i }).click();
     await expect(page.getByText(sessionTitle).first()).toBeVisible();
 
     // ── And then it starts ──────────────────────────────────────────────────
@@ -319,7 +322,8 @@ test.describe("the hybrid session journey", () => {
     });
 
     await page.goto("/instructor/sessions");
-    await page.getByRole("button", { name: /^completed$/i }).click();
+    // The tab carries a count beside its label, so match the label only.
+    await page.getByRole("button", { name: /^completed\s*\d*$/i }).click();
     const row = page.locator("article").filter({ hasText: sessionTitle }).first();
     await expect(row).toBeVisible();
     await row.getByRole("button", { name: /add recording/i }).click();
@@ -331,8 +335,9 @@ test.describe("the hybrid session journey", () => {
     await recordingDialog.getByRole("button", { name: /save recording/i }).click();
     await expect(recordingDialog).toBeHidden();
 
-    const recordings = await api(instructorToken, "GET", `/sessions/${sessionId}/recordings`);
-    expect(recordings.length).toBe(1);
+    // Recordings are listed from /recordings; the per-session route is write-only.
+    const recordings = await api(instructorToken, "GET", "/recordings");
+    expect(recordings.filter((r) => r.session_id === sessionId)).toHaveLength(1);
 
     await switchTo(page, "student");
     await page.goto("/student/recordings");

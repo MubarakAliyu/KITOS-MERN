@@ -705,6 +705,72 @@ describe("the admin attendance report", () => {
     expect(res.body.students[0].by_method).toEqual({ roster: 1 });
   });
 
+  /**
+   * AC2.3: all three ways of being marked present reach the report under
+   * their own name, so an administrator can see how a class was registered
+   * as well as who was there.
+   */
+  it("breaks a child's attendance down by how each mark was made", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const { course, instructor, session } = await makeCourseWithSession({
+      offsetMs: -3 * DAY,
+    });
+    const family = await enrolledStudent(course);
+
+    // Three classes on the same course, one per method.
+    const scanned = await Session.create({
+      title: "Scanned in",
+      course_id: course._id,
+      instructor_id: instructor._id,
+      scheduled_at: new Date(Date.now() - 2 * DAY),
+      duration_minutes: 60,
+      mode: "physical",
+      venue: "StarNova Labs, Sokoto",
+    });
+    const joined = await Session.create({
+      title: "Joined online",
+      course_id: course._id,
+      instructor_id: instructor._id,
+      scheduled_at: new Date(Date.now() - DAY),
+      duration_minutes: 60,
+      mode: "online",
+      meeting_url: "https://meet.example.com/y",
+    });
+
+    await Attendance.create({
+      session_id: session._id,
+      student_id: family.student._id,
+      status: "present",
+      method: "roster",
+    });
+    await Attendance.create({
+      session_id: scanned._id,
+      student_id: family.student._id,
+      status: "present",
+      method: "qr",
+    });
+    await Attendance.create({
+      session_id: joined._id,
+      student_id: family.student._id,
+      status: "present",
+      method: "auto",
+    });
+
+    const res = await request(server)
+      .get("/admin/sessions/attendance-report")
+      .set(auth(admin));
+
+    expect(res.status).toBe(200);
+    expect(res.body.sessions_held).toBe(3);
+
+    const row = res.body.students.find(
+      (r) => r.student_id === String(family.student._id)
+    );
+    expect(row.by_method).toEqual({ roster: 1, qr: 1, auto: 1 });
+    expect(row.sessions_attended).toBe(3);
+    expect(row.rate).toBe(100);
+  });
+
   it("counts a late arrival as present", async () => {
     const admin = await makeUser({ role: "admin" });
     const { course, session } = await makeCourseWithSession({ offsetMs: -3 * DAY });

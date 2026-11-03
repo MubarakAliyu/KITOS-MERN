@@ -121,6 +121,7 @@ export function collectErrors(page) {
  *   white on red-500                    3.x:1    the unread notification badge
  *   Sonner's success green on its mint  4.25:1   toast, third-party default
  *   --text-muted on dark surfaces       3.69:1   secondary text in dark theme
+ *   the teal "In Progress" chip         3.x:1    on a 12% tint of itself
  *
  * Matching is per node and by exact colour pair, so this cannot quietly
  * swallow anything else: a contrast failure involving any other pair, or any
@@ -139,6 +140,10 @@ export const KNOWN_PALETTE_CONTRAST = [
   // background is a blend of amber-500 and the dark surface beneath it.
   "foreground color: #e17100, background color: #3f311f",
   "foreground color: #6b7280, background color: #1d1e25",
+  // The "In Progress" chip on a child's course card: the retained design's
+  // teal on a 12% tint of itself. Unreachable until this batch, because
+  // progress was a hard-coded empty array and every card read "Not Started".
+  "foreground color: #0ea5a5, background color: #193242",
 ];
 
 function isKnownPaletteNode(node) {
@@ -147,9 +152,28 @@ function isKnownPaletteNode(node) {
 }
 
 export async function expectNoSeriousAxeViolations(page, label) {
-  // The dashboards fade in with motion/react. Scanning mid-transition samples
-  // half-faded colours and invents contrast failures that vanish once the
-  // page is at rest, so settle it first.
+  // The dashboards fade in with motion/react, and several of them fetch once
+  // per child or per course after mount. Scanning before all of that has
+  // settled samples half-faded colours and skeleton placeholders, and invents
+  // contrast failures that are not there once the page is at rest.
+  //
+  // Killing CSS animation is not enough on its own: motion/react animates an
+  // inline opacity, with a per-card delay, and a card re-enters when its own
+  // fetch resolves. So wait for the loading placeholders to go first, then
+  // freeze what is left.
+  await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll(".skeleton-shimmer")].every(
+          (node) => node.offsetParent === null
+        ),
+      undefined,
+      { timeout: 15000 }
+    )
+    .catch(() => {
+      // A screen with no placeholders at all never had any to wait for.
+    });
+
   await page
     .addStyleTag({
       content: `*, *::before, *::after {
@@ -158,7 +182,10 @@ export async function expectNoSeriousAxeViolations(page, label) {
       }`,
     })
     .catch(() => {});
-  await page.waitForTimeout(600);
+
+  // Long enough for the staggered entry animations to have finished: the
+  // longest is a 0.35s fade on the fifth card, delayed 0.1s each.
+  await page.waitForTimeout(1500);
 
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])

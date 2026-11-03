@@ -101,7 +101,7 @@ jobs:
           echo "MSW is absent from the production build."
 
   e2e:
-    name: End-to-end — smoke and axe
+    name: End-to-end — journeys, smoke and axe
     runs-on: ubuntu-latest
     needs: [server, client]
 
@@ -139,8 +139,10 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # The E2E run needs a real database, a real API and a real client: the
-      # point of Batch 1 is that the retained frontend works against the
-      # backend, which a mocked run would not show.
+      # point of this project is that the retained frontend works against the
+      # backend, which a mocked run would not show. Batch 2's journeys schedule
+      # their own class and wait for it to start, so this job is a few minutes
+      # longer than it was — the waiting is the test.
       - name: Start MongoDB
         working-directory: server
         run: npm run db:local &
