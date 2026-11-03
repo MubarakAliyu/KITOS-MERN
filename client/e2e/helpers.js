@@ -53,6 +53,19 @@ export async function signIn(page, role) {
 }
 
 /**
+ * Signs out and signs in as another role, in the same tab.
+ *
+ * The journeys follow one piece of work through several pairs of hands, so
+ * they change role repeatedly. The session lives in a cookie and the access
+ * token is read from it per request, so clearing cookies is a real sign-out —
+ * nothing of the previous role survives into the next.
+ */
+export async function switchTo(page, role) {
+  await page.context().clearCookies();
+  return signIn(page, role);
+}
+
+/**
  * Returns the sidebar, opening it first on a narrow viewport.
  *
  * Below the `md` breakpoint the sidebar is an overlay that starts closed, so a

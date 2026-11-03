@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -8,20 +8,14 @@ import { z } from "zod";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { createSession, updateSession } from "@/_lib/api/sessions";
+import { getInstructorCourses } from "@/_lib/api/instructor";
 
-// Static course list for the mock (the real form would load the instructor's
-// courses from the API).
-const COURSE_OPTIONS = [
-  "Scratch Programming for Beginners",
-  "HTML & CSS Fundamentals",
-  "Introduction to Python",
-];
 
 const DURATIONS = [30, 45, 60, 90, 120];
 
 const schema = z
   .object({
-    course: z.string().min(1, "Course is required"),
+    course_id: z.string().min(1, "Course is required"),
     title: z.string().trim().min(3, "Title must be at least 3 characters"),
     session_number: z.coerce.number().int().positive().optional().or(z.literal("")),
     date: z.string().min(1, "Date is required"),
@@ -64,6 +58,26 @@ const todayDate = () => splitDateTime(new Date().toISOString()).date;
 export default function SessionFormModal({ isOpen, onClose, session, onSaved }) {
   const isEdit = !!session;
 
+  // The instructor's own courses, loaded when the dialog opens. A class has to
+  // belong to a real course — the API keys attendance, the register and the
+  // recordings off it — so the list cannot be written in here.
+  const [courses, setCourses] = useState([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    getInstructorCourses()
+      .then((list) => {
+        if (!cancelled) setCourses(list);
+      })
+      .catch(() => {
+        if (!cancelled) setCourses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
   const {
     register,
     handleSubmit,
@@ -72,7 +86,7 @@ export default function SessionFormModal({ isOpen, onClose, session, onSaved }) 
   } = useForm({
     resolver: zodResolver(schema),
     defaultValues: {
-      course: "",
+      course_id: "",
       title: "",
       session_number: "",
       date: "",
@@ -90,7 +104,7 @@ export default function SessionFormModal({ isOpen, onClose, session, onSaved }) 
     if (session) {
       const { date, time } = splitDateTime(session.scheduled_at);
       reset({
-        course: session.course ?? "",
+        course_id: session.course_id ?? "",
         title: session.title ?? "",
         session_number: session.session_number ?? "",
         date,
@@ -103,7 +117,7 @@ export default function SessionFormModal({ isOpen, onClose, session, onSaved }) 
       });
     } else {
       reset({
-        course: "",
+        course_id: "",
         title: "",
         session_number: "",
         date: "",
@@ -123,7 +137,7 @@ export default function SessionFormModal({ isOpen, onClose, session, onSaved }) 
   async function onSubmit(data) {
     const scheduled_at = new Date(`${data.date}T${data.time}`).toISOString();
     const payload = {
-      course: data.course,
+      course_id: data.course_id,
       title: data.title,
       session_number: data.session_number === "" ? null : Number(data.session_number),
       scheduled_at,
@@ -183,11 +197,18 @@ export default function SessionFormModal({ isOpen, onClose, session, onSaved }) 
 
             <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-1 flex-col overflow-hidden">
               <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
-                <Field id="s-course" label="Course" error={errors.course?.message}>
-                  <select id="s-course" {...register("course")} className={inputClass(errors.course)}>
+                <Field id="s-course" label="Course" error={errors.course_id?.message}>
+                  <select
+                    id="s-course"
+                    {...register("course_id")}
+                    disabled={isEdit}
+                    className={inputClass(errors.course_id)}
+                  >
                     <option value="">Select a course</option>
-                    {COURSE_OPTIONS.map((c) => (
-                      <option key={c} value={c}>{c}</option>
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.title}
+                      </option>
                     ))}
                   </select>
                 </Field>

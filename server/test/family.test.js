@@ -5,6 +5,10 @@ import { User } from "../src/models/User.js";
 import { Student } from "../src/models/Student.js";
 import { Consent } from "../src/models/Consent.js";
 import { Notification } from "../src/models/Notification.js";
+import { Course } from "../src/models/Course.js";
+import { Enrollment } from "../src/models/Enrollment.js";
+import { Lesson } from "../src/models/Lesson.js";
+import { Module } from "../src/models/Module.js";
 
 const server = app();
 
@@ -235,10 +239,49 @@ describe("GET /parents/me and /parents/me/children", () => {
     expect(res.body.map((c) => c.name)).toEqual(["Alpha Child", "Beta Child"]);
     for (const child of res.body) {
       expect(child.admission_no).toMatch(/^KIT\/\d{2}\/\d{3,4}$/);
-      // Progress arrives in Batch 2.
+      // Neither child is on a course yet, so zero is the truth here.
       expect(child.enrolled_courses).toBe(0);
       expect(child.completed_courses).toBe(0);
     }
+  });
+
+  it("counts each child's courses, and the ones they finished", async () => {
+    const { parent, student } = await makeFamily();
+    const instructor = await makeUser({ role: "instructor" });
+
+    const [active, done] = await Promise.all([
+      Course.create({
+        title: "In progress",
+        programme_track: "scratch",
+        instructor_id: instructor._id,
+        status: "published",
+      }),
+      Course.create({
+        title: "Finished",
+        programme_track: "robotics",
+        instructor_id: instructor._id,
+        status: "published",
+      }),
+    ]);
+
+    await Enrollment.create({
+      student_id: student._id,
+      course_id: active._id,
+      status: "active",
+      progress: 40,
+    });
+    await Enrollment.create({
+      student_id: student._id,
+      course_id: done._id,
+      status: "completed",
+      progress: 100,
+    });
+
+    const res = await request(server).get("/parents/me/children").set(auth(parent));
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].enrolled_courses).toBe(2);
+    expect(res.body[0].completed_courses).toBe(1);
   });
 
   it("returns an empty list for a parent with no children", async () => {
@@ -248,6 +291,103 @@ describe("GET /parents/me and /parents/me/children", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
+  });
+});
+
+describe("GET /students/:id/progress", () => {
+  /** A published course with one lesson, taught by `instructor`. */
+  async function courseWithLesson(instructor, title) {
+    const course = await Course.create({
+      title,
+      programme_track: "scratch",
+      instructor_id: instructor._id,
+      status: "published",
+    });
+    const module = await Module.create({
+      course_id: course._id,
+      title: "Module One",
+      order_index: 1,
+    });
+    await Lesson.create({
+      module_id: module._id,
+      course_id: course._id,
+      title: "Lesson One",
+      content_type: "text",
+      body_content: "<p>Hello</p>",
+      order_index: 1,
+    });
+    return course;
+  }
+
+  it("gives a parent their child's per-course progress", async () => {
+    const { parent, student, childUser } = await makeFamily();
+    const instructor = await makeUser({ role: "instructor" });
+    const course = await courseWithLesson(instructor, "Scratch Basics");
+
+    await Enrollment.create({
+      student_id: student._id,
+      course_id: course._id,
+      status: "active",
+    });
+
+    // Before: on the course, nothing done.
+    let res = await request(server)
+      .get(`/students/${student._id}/progress`)
+      .set(auth(parent));
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].course_title).toBe("Scratch Basics");
+    expect(res.body[0].progress).toBe(0);
+
+    // The child does the only lesson.
+    const lesson = await Lesson.findOne({ course_id: course._id });
+    await request(server).post(`/lessons/${lesson._id}/complete`).set(auth(childUser));
+
+    // After: the parent sees it, which is the point of the screen.
+    res = await request(server).get(`/students/${student._id}/progress`).set(auth(parent));
+    expect(res.body[0].progress).toBe(100);
+    expect(res.body[0].modules_completed).toBe(1);
+    expect(res.body[0].modules_total).toBe(1);
+    expect(res.body[0].status).toBe("completed");
+  });
+
+  it("refuses a parent asking about someone else's child", async () => {
+    const { student } = await makeFamily();
+    const stranger = await makeUser({ role: "parent" });
+
+    const res = await request(server)
+      .get(`/students/${student._id}/progress`)
+      .set(auth(stranger));
+
+    expect(res.status).toBe(403);
+  });
+
+  /**
+   * ADR-014 deferred this narrowing to Batch 2, when there would be
+   * enrolments to narrow by. A teacher of the robotics class has no business
+   * reading the progress of a child they have never taught.
+   */
+  it("lets an instructor see only a child on one of their own courses", async () => {
+    const { student } = await makeFamily();
+    const theirs = await makeUser({ role: "instructor" });
+    const other = await makeUser({ role: "instructor" });
+
+    const course = await courseWithLesson(theirs, "Their Course");
+    await Enrollment.create({
+      student_id: student._id,
+      course_id: course._id,
+      status: "active",
+    });
+
+    const allowed = await request(server)
+      .get(`/students/${student._id}/progress`)
+      .set(auth(theirs));
+    expect(allowed.status).toBe(200);
+
+    const refused = await request(server)
+      .get(`/students/${student._id}/progress`)
+      .set(auth(other));
+    expect(refused.status).toBe(403);
   });
 });
 
@@ -289,6 +429,43 @@ describe("GET /instructors/me", () => {
     expect(res.body.bio).toBe("Teaches Scratch.");
     expect(res.body.id).toBe(String(instructor._id));
     expect(res.body.user_id).toBe(String(instructor._id));
+  });
+
+  it("counts their courses and their distinct pupils", async () => {
+    const instructor = await makeUser({ role: "instructor" });
+    const [one, two] = await Promise.all([
+      Course.create({
+        title: "Course One",
+        programme_track: "scratch",
+        instructor_id: instructor._id,
+        status: "published",
+      }),
+      Course.create({
+        title: "Course Two",
+        programme_track: "advanced",
+        instructor_id: instructor._id,
+        status: "published",
+      }),
+    ]);
+
+    const { student } = await makeFamily();
+    // The same child on both courses is one child, not two.
+    await Enrollment.create({
+      student_id: student._id,
+      course_id: one._id,
+      status: "active",
+    });
+    await Enrollment.create({
+      student_id: student._id,
+      course_id: two._id,
+      status: "active",
+    });
+
+    const res = await request(server).get("/instructors/me").set(auth(instructor));
+
+    expect(res.status).toBe(200);
+    expect(res.body.courses_count).toBe(2);
+    expect(res.body.students_count).toBe(1);
   });
 });
 

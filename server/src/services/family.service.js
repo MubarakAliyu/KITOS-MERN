@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 import { User, hashPassword } from "../models/User.js";
 import { Student } from "../models/Student.js";
 import { Consent } from "../models/Consent.js";
+import { Course } from "../models/Course.js";
+import { Enrollment } from "../models/Enrollment.js";
 import { Notification } from "../models/Notification.js";
 import { nextAdmissionNumber } from "../lib/numbering.js";
 import { generateTempPassword } from "../lib/tokens.js";
@@ -14,6 +16,7 @@ import {
   toTrackLabel,
   CONSENT_SCOPES,
 } from "../config/constants.js";
+import { studentProgressFeed } from "./course.service.js";
 import { supportsTransactions } from "../config/db.js";
 
 /**
@@ -44,8 +47,6 @@ export function getParentProfile(user) {
 /**
  * The parent's children, oldest-added first so the dashboard's child switcher
  * keeps a stable order between visits.
- *
- * Progress counters are 0 until the enrollments collection lands in Batch 2.
  */
 export async function listChildren(parentUser) {
   const students = await Student.find({ parent_id: parentUser._id }).sort({
@@ -58,12 +59,39 @@ export async function listChildren(parentUser) {
   );
   const byId = new Map(accounts.map((a) => [String(a._id), a]));
 
+  const counts = await enrolmentCounts(students.map((s) => s._id));
+
   return students.map((student) => {
     const account = byId.get(String(student.user_id));
     return student.toParentJSON({
       admission_no: account?.admission_no ?? null,
+      ...(counts.get(String(student._id)) ?? { enrolled_courses: 0, completed_courses: 0 }),
     });
   });
+}
+
+/**
+ * How many courses each of these children is on, and how many they finished.
+ *
+ * One query for the whole family rather than two per child: a parent with
+ * several children would otherwise fan out into a dozen round trips to draw
+ * one screen.
+ */
+async function enrolmentCounts(studentIds) {
+  const rows = await Enrollment.find({
+    student_id: { $in: studentIds },
+    status: { $in: ["active", "completed"] },
+  }).select("student_id status");
+
+  const counts = new Map();
+  for (const row of rows) {
+    const key = String(row.student_id);
+    const tally = counts.get(key) ?? { enrolled_courses: 0, completed_courses: 0 };
+    tally.enrolled_courses += 1;
+    if (row.status === "completed") tally.completed_courses += 1;
+    counts.set(key, tally);
+  }
+  return counts;
 }
 
 /**
@@ -248,14 +276,10 @@ export async function getStudentProfile(user) {
  * Per-course progress for one student.
  *
  * Ownership (PRD §9.2): a parent may read their own child, a student their own
- * record, an admin anyone. An instructor may read a student enrolled on one of
- * their courses — which needs the enrollments collection, so until Batch 2
- * lands an instructor is allowed through on the strength of the matrix alone
- * and the narrowing is a Batch 2 task (ADR-014).
- *
- * Returns an empty array for now: progress is computed from enrollments and
- * lesson completions, both of which arrive in Batch 2. The parent dashboard
- * renders its empty state, as the batch brief intends.
+ * record, an admin anyone, and an instructor only a child enrolled on one of
+ * their own courses — the narrowing ADR-014 deferred to this batch, now that
+ * there are enrolments to narrow by. A teacher of the robotics class has no
+ * business reading the progress of a child they have never taught.
  */
 export async function getStudentProgress({ studentId, requester }) {
   const student = await Student.findById(studentId);
@@ -263,11 +287,19 @@ export async function getStudentProgress({ studentId, requester }) {
 
   const requesterId = String(requester._id);
 
-  const allowed =
+  let allowed =
     requester.role === "admin" ||
-    requester.role === "instructor" ||
     (requester.role === "parent" && String(student.parent_id) === requesterId) ||
     (requester.role === "student" && String(student.user_id) === requesterId);
+
+  if (!allowed && requester.role === "instructor") {
+    const theirCourses = await Course.find({ instructor_id: requester._id }).select("_id");
+    allowed = await Enrollment.exists({
+      student_id: student._id,
+      course_id: { $in: theirCourses.map((c) => c._id) },
+      status: { $in: ["active", "completed"] },
+    });
+  }
 
   if (!allowed) {
     throw forbidden(
@@ -276,16 +308,25 @@ export async function getStudentProgress({ studentId, requester }) {
     );
   }
 
-  return [];
+  return studentProgressFeed(student._id);
 }
 
 /**
  * The instructor's own profile (handlers.js `INSTRUCTOR_ME`).
  *
  * As with parents there is no `instructors` collection, so `id` and `user_id`
- * are the same value (ADR-013). Course and student counts come from Batch 2.
+ * are the same value (ADR-013).
  */
-export function getInstructorProfile(user) {
+export async function getInstructorProfile(user) {
+  const courses = await Course.find({ instructor_id: user._id }).select("_id");
+  const courseIds = courses.map((c) => c._id);
+
+  // Distinct children: one pupil on three of their courses is one pupil.
+  const studentIds = await Enrollment.find({
+    course_id: { $in: courseIds },
+    status: { $in: ["active", "completed"] },
+  }).distinct("student_id");
+
   return {
     id: String(user._id),
     user_id: String(user._id),
@@ -293,8 +334,8 @@ export function getInstructorProfile(user) {
     email: user.email ?? null,
     bio: user.bio ?? null,
     avatar_initial: avatarInitial(user.name),
-    courses_count: 0,
-    students_count: 0,
+    courses_count: courses.length,
+    students_count: studentIds.length,
     joined: user.created_at?.toISOString().slice(0, 10) ?? null,
   };
 }

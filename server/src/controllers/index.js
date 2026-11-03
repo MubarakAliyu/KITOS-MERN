@@ -257,7 +257,7 @@ export const getStudentProgress = handle(async (req, res) => {
 // ── Instructors ─────────────────────────────────────────────────────────────
 
 export const getInstructorMe = handle(async (req, res) => {
-  res.status(200).json(familyService.getInstructorProfile(req.user));
+  res.status(200).json(await familyService.getInstructorProfile(req.user));
 });
 
 /*
