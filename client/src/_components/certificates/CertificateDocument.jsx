@@ -165,8 +165,16 @@ function formatDate(value) {
   }
 }
 
-function verificationCode(id) {
-  return `KIT-${(id || "").toUpperCase().replace(/[^A-Z0-9]/g, "")}-VERIFY`;
+/**
+ * The code a family can check at /verify.
+ *
+ * This used to be derived from the record's id, which read like a code and
+ * verified as nothing — there was no real one to print while the data was
+ * mocked. The server now issues one, so print that; a certificate whose code
+ * is refused at the desk is worse than one with no code at all.
+ */
+function verificationCode(cert) {
+  return cert.verification_code ?? cert.serial ?? "";
 }
 
 export function CertificateDocument({ cert }) {
@@ -248,7 +256,7 @@ export function CertificateDocument({ cert }) {
           </View>
 
           <View style={styles.bandColRight}>
-            <Text style={styles.bandText}>{verificationCode(cert.id)}</Text>
+            <Text style={styles.bandText}>{verificationCode(cert)}</Text>
           </View>
         </View>
       </Page>

@@ -8,6 +8,9 @@ import { Submission } from "../models/Submission.js";
 import { QuizAttempt } from "../models/QuizAttempt.js";
 import { LessonCompletion } from "../models/LessonCompletion.js";
 import { Enrollment } from "../models/Enrollment.js";
+import { Session } from "../models/Session.js";
+import { Attendance } from "../models/Attendance.js";
+import { Recording } from "../models/Recording.js";
 import { Student } from "../models/Student.js";
 import { User } from "../models/User.js";
 import { notFound, forbidden, badRequest } from "../lib/errors.js";
@@ -486,6 +489,11 @@ export async function deleteCourse({ user, courseId }) {
     const opts = session ? { session } : {};
     const scope = { course_id: course._id };
 
+    // The class registers and recordings hang off the session, not the
+    // course, so collect the session ids before the sessions go.
+    const sessionIds = await Session.find(scope, { _id: 1 }, opts).distinct("_id");
+    const bySession = { session_id: { $in: sessionIds } };
+
     await Promise.all([
       Lesson.deleteMany(scope, opts),
       Quiz.deleteMany(scope, opts),
@@ -495,6 +503,9 @@ export async function deleteCourse({ user, courseId }) {
       LessonCompletion.deleteMany(scope, opts),
       Module.deleteMany(scope, opts),
       Enrollment.deleteMany(scope, opts),
+      Attendance.deleteMany(bySession, opts),
+      Recording.deleteMany(bySession, opts),
+      Session.deleteMany(scope, opts),
     ]);
 
     await Course.deleteOne({ _id: course._id }, opts);

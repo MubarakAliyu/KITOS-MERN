@@ -11,6 +11,9 @@ import { Submission } from "../src/models/Submission.js";
 import { Enrollment } from "../src/models/Enrollment.js";
 import { LessonCompletion } from "../src/models/LessonCompletion.js";
 import { Certificate } from "../src/models/Certificate.js";
+import { Session } from "../src/models/Session.js";
+import { Attendance } from "../src/models/Attendance.js";
+import { Recording } from "../src/models/Recording.js";
 import { progressBreakdown } from "../src/services/progress.service.js";
 import { issueCertificate } from "../src/services/enrollment.service.js";
 import { sanitizeLessonHtml, toYouTubeEmbedUrl } from "../src/lib/sanitizeContent.js";
@@ -939,6 +942,26 @@ describe("cascading deletes", () => {
       .set(auth(childUser))
       .send({ quiz_id: String(quiz._id), answers: {} });
 
+    // A class on the course, with a register and a recording.
+    const session = await Session.create({
+      course_id: course._id,
+      instructor_id: course.instructor_id,
+      title: "Week 1",
+      scheduled_at: new Date(),
+      duration_minutes: 60,
+    });
+    await Attendance.create({
+      session_id: session._id,
+      student_id: student._id,
+      status: "present",
+      method: "roster",
+    });
+    await Recording.create({
+      session_id: session._id,
+      url: "https://youtube.com/watch?v=abc",
+      source: "youtube",
+    });
+
     const admin = await makeUser({ role: "admin" });
     const res = await request(server)
       .delete(`/admin/courses/${course._id}`)
@@ -955,6 +978,41 @@ describe("cascading deletes", () => {
     expect(await QuizAttempt.countDocuments({})).toBe(0);
     expect(await LessonCompletion.countDocuments({})).toBe(0);
     expect(await Enrollment.countDocuments({})).toBe(0);
+
+    // Batch 2's collections go too. A register or a recording pointing at a
+    // class that no longer exists would surface on the admin screens as a
+    // blank row, and the attendance report would count it.
+    expect(await Session.countDocuments({})).toBe(0);
+    expect(await Attendance.countDocuments({})).toBe(0);
+    expect(await Recording.countDocuments({})).toBe(0);
+  }, 30000);
+
+  it("keeps a certificate the child already earned", async () => {
+    const { course, lessons } = await makeCourse({ lessons: 1 });
+    const { student, childUser } = await makeFamily();
+    await enrol(student, course);
+
+    await request(server)
+      .post(`/lessons/${lessons[0]._id}/complete`)
+      .set(auth(childUser));
+    expect(await Certificate.countDocuments({})).toBe(1);
+
+    const admin = await makeUser({ role: "admin" });
+    await request(server).delete(`/admin/courses/${course._id}`).set(auth(admin));
+
+    // Deliberately outside the cascade. The child earned it against the
+    // course as it stood, the name and title on it are snapshots, and a
+    // school retiring a course must not void certificates already in
+    // families' hands — nor break the code printed on them.
+    const certificate = await Certificate.findOne({});
+    expect(certificate).not.toBeNull();
+    expect(certificate.course_title).toBe("Test Course");
+
+    const res = await request(server).get(
+      `/certificates/verify/${certificate.verification_code}`
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.valid).toBe(true);
   }, 30000);
 
   it("removes a module's contents and recalculates the course", async () => {
