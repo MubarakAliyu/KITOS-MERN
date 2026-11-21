@@ -319,5 +319,23 @@ export const postSendNotification = handle(async (req, res) => {
     user: req.user,
     payload: req.body,
   });
+
+  // Only an administrator's broadcast is an administrative act worth
+  // auditing. The same endpoint carries ordinary platform events fired from
+  // any signed-in user's browser, and auditing those would bury the log.
+  if (req.user.role === "admin" && result.announcement_id) {
+    await logActivity({
+      actor: actorOf(req),
+      action: "sent_announcement",
+      description: `Announced "${req.body.title}" to ${result.delivered} recipient(s)`,
+      target_type: "announcement",
+      target_id: result.announcement_id,
+      ip: clientIp(req),
+    });
+  }
+
   res.status(200).json(result);
 });
+
+/** Batch 3 — chat, notifications and announcements. */
+export * from "./chat.js";

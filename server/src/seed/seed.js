@@ -53,6 +53,9 @@ import { Certificate } from "../models/Certificate.js";
 import { Session } from "../models/Session.js";
 import { Attendance } from "../models/Attendance.js";
 import { Recording } from "../models/Recording.js";
+import { Conversation } from "../models/Conversation.js";
+import { Message } from "../models/Message.js";
+import { Announcement } from "../models/Announcement.js";
 import { nairaToKobo } from "../lib/serialize.js";
 import { recalculateProgress } from "../services/progress.service.js";
 import { issueCertificate } from "../services/enrollment.service.js";
@@ -154,6 +157,9 @@ async function clearCollections() {
     Session.deleteMany({}),
     Attendance.deleteMany({}),
     Recording.deleteMany({}),
+    Conversation.deleteMany({}),
+    Message.deleteMany({}),
+    Announcement.deleteMany({}),
   ]);
 }
 
@@ -163,12 +169,13 @@ export async function runSeed({ quiet = false } = {}) {
   const passwords = resolvePasswords();
   const hashes = await hashAll(passwords);
 
-  say("Clearing the Batch 1 collections…");
+  say("Clearing the seeded collections…");
   await clearCollections();
 
   // ── Cohorts (before students, which reference them) ──────────────────────
   const cohortIds = new Map();
   const instructorIds = new Map();
+  const adminIds = new Map();
 
   // ── Staff and parents ────────────────────────────────────────────────────
   say("Creating staff and parent accounts…");
@@ -182,6 +189,7 @@ export async function runSeed({ quiet = false } = {}) {
       must_reset_password: Boolean(admin.must_reset_password),
       is_active: true,
     });
+    adminIds.set(admin.key, user._id);
     if (admin.key === "amina") instructorIds.set("amina", user._id);
   }
 
@@ -277,7 +285,12 @@ export async function runSeed({ quiet = false } = {}) {
       await profile.save();
     }
 
-    createdStudents.push({ admissionNo, profileId: profile._id, ...student });
+    createdStudents.push({
+      admissionNo,
+      profileId: profile._id,
+      userId: user._id,
+      ...student,
+    });
   }
 
   // Move the counter past the hand-written numbers, so the first
@@ -500,6 +513,121 @@ export async function runSeed({ quiet = false } = {}) {
     }
   }
 
+  // ── Chat ─────────────────────────────────────────────────────────────────
+  // Two threads, both of them allowed pairs (PRD §10): a pupil with the
+  // instructor who teaches them, and a parent with an administrator. The
+  // pupil's thread carries their parent as an observer, which is the rule the
+  // chat screens demonstrate — a parent reads their child's conversations
+  // without being able to write in them.
+  say("Creating conversations…");
+
+  const studentUserIds = new Map(
+    createdStudents.map((entry) => [entry.key, entry.userId])
+  );
+
+  let messagesSeeded = 0;
+
+  async function seedThread({ participants, observers = [], messages }) {
+    const conversation = await Conversation.create({
+      participant_ids: participants,
+      observer_ids: observers,
+    });
+
+    let last = null;
+    const unread = new Map();
+
+    for (const entry of messages) {
+      const createdAt = new Date(Date.now() - entry.minutesAgo * 60 * 1000);
+      const receiver = participants.find(
+        (id) => String(id) !== String(entry.from)
+      );
+
+      // `created_at` is managed by the schema's timestamps, so it is set
+      // explicitly after create — a seeded transcript that all arrived in the
+      // same millisecond would sort arbitrarily.
+      const message = await Message.create({
+        conversation_id: conversation._id,
+        sender_id: entry.from,
+        receiver_id: receiver,
+        message: entry.text,
+        read: entry.read ?? true,
+      });
+      await Message.updateOne(
+        { _id: message._id },
+        { $set: { created_at: createdAt } },
+        { timestamps: false }
+      );
+      messagesSeeded += 1;
+
+      if (!(entry.read ?? true)) {
+        unread.set(String(receiver), (unread.get(String(receiver)) ?? 0) + 1);
+      }
+      last = { text: entry.text, at: createdAt, from: entry.from };
+    }
+
+    conversation.last_message = last?.text?.slice(0, 200) ?? "";
+    conversation.last_message_at = last?.at ?? null;
+    conversation.last_sender_id = last?.from ?? null;
+    conversation.unread = unread;
+    await conversation.save();
+
+    return conversation;
+  }
+
+  const liamUserId = studentUserIds.get("liam");
+  const sarahUserId = instructorIds.get("sarah");
+  const fatimaUserId = parentIds.get("fatima");
+  const adminUserId = adminIds.get("admin");
+
+  if (liamUserId && sarahUserId) {
+    await seedThread({
+      participants: [liamUserId, sarahUserId],
+      observers: fatimaUserId ? [fatimaUserId] : [],
+      messages: [
+        {
+          from: liamUserId,
+          text: "Hi Ms. Sarah! How are you finding the Scratch course so far?",
+          minutesAgo: 180,
+        },
+        {
+          from: sarahUserId,
+          text: "Hi Liam! I am really enjoying teaching it. How about you?",
+          minutesAgo: 175,
+        },
+        {
+          from: liamUserId,
+          text: "I love the animations module! I built a cat chasing a mouse.",
+          minutesAgo: 170,
+        },
+        {
+          from: sarahUserId,
+          text: "That sounds amazing! Great work on your last assignment.",
+          minutesAgo: 90,
+          read: false,
+        },
+      ],
+    });
+  }
+
+  if (fatimaUserId && adminUserId) {
+    await seedThread({
+      participants: [fatimaUserId, adminUserId],
+      messages: [
+        {
+          from: fatimaUserId,
+          text: "Hello, I have a question about the enrolment fees.",
+          minutesAgo: 240,
+        },
+        {
+          from: adminUserId,
+          text: "Hello Mrs. Hassan! Happy to help. What would you like to know?",
+          minutesAgo: 235,
+          read: false,
+        },
+      ],
+    });
+  }
+
   // ── Settings ─────────────────────────────────────────────────────────────
   say("Writing platform settings…");
   await Setting.create({ key: "platform", ...SETTINGS, permissions: [] });
@@ -527,6 +655,8 @@ export async function runSeed({ quiet = false } = {}) {
     enrolments: ENROLMENTS.length,
     sessions: SESSIONS.length,
     certificates: certificatesIssued,
+    conversations: await Conversation.countDocuments({}),
+    messages: messagesSeeded,
     firstAdmission: createdStudents[0]?.admissionNo,
     lastAdmission: createdStudents.at(-1)?.admissionNo,
     passwordSource: passwords.source,
@@ -581,6 +711,7 @@ async function main() {
     console.log(`  Enrolments:  ${summary.enrolments}`);
     console.log(`  Sessions:    ${summary.sessions}`);
     console.log(`  Certificates: ${summary.certificates}`);
+    console.log(`  Conversations: ${summary.conversations} (${summary.messages} messages)`);
     console.log(`  Passwords:   ${summary.passwordSource}`);
 
     if (!isProduction()) {

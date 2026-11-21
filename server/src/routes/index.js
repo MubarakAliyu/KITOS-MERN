@@ -11,6 +11,7 @@ import {
   loginLimiter,
   forgotPasswordLimiter,
   passwordChangeLimiter,
+  messageLimiter,
 } from "../middleware/rateLimit.js";
 import * as s from "../validators/schemas.js";
 import { placeholderRouter } from "./placeholders.js";
@@ -281,6 +282,66 @@ router.post(
   requirePermission("chat.use"),
   validate({ body: s.sendNotificationBody }),
   c.postSendNotification
+);
+
+// ── Batch 3: chat ───────────────────────────────────────────────────────────
+// Who may talk to whom is decided in chat.service.js (PRD §10), not here: the
+// matrix grants `chat.use` to every role, and the pair rules narrow it.
+
+router.get(
+  "/conversations",
+  authenticate,
+  requirePermission("chat.use"),
+  validate({ query: s.listConversationsQuery }),
+  c.getConversations
+);
+
+/** Literal path before `/messages`, so it is not read as a query-less list. */
+router.put(
+  "/messages/read",
+  authenticate,
+  requirePermission("chat.use"),
+  validate({ body: s.markReadBody }),
+  c.putMessagesRead
+);
+
+router.get(
+  "/messages",
+  authenticate,
+  requirePermission("chat.use"),
+  validate({ query: s.listMessagesQuery }),
+  c.getMessages
+);
+
+router.post(
+  "/messages",
+  authenticate,
+  requirePermission("chat.use"),
+  messageLimiter,
+  validate({ body: s.sendMessageBody }),
+  c.postMessage
+);
+
+router.get(
+  "/chat/contacts",
+  authenticate,
+  requirePermission("chat.use"),
+  c.getContactable
+);
+
+router.post(
+  "/chat/report",
+  authenticate,
+  requirePermission("chat.use"),
+  validate({ body: s.reportConversationBody }),
+  c.postReportConversation
+);
+
+router.get(
+  "/admin/chat/all-conversations",
+  authenticate,
+  requirePermission("chat.monitor"),
+  c.getAllConversations
 );
 
 // ── Batch 2: learning, assessment, certificates and sessions ────────────────

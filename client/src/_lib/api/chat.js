@@ -35,3 +35,23 @@ export async function getAllConversations() {
   const { data } = await apiClient.get("/admin/chat/all-conversations");
   return data;
 }
+
+/** Who the signed-in user is allowed to start a conversation with (PRD §10). */
+export async function getChatContacts() {
+  const { data } = await apiClient.get("/chat/contacts");
+  return data;
+}
+
+/**
+ * Reports a conversation for an administrator to review.
+ *
+ * Nothing is hidden or deleted — an admin can already read every thread — so
+ * this flags one as needing attention and notifies them.
+ */
+export async function reportConversation(conversationId, reason) {
+  const { data } = await apiClient.post("/chat/report", {
+    conversation_id: conversationId,
+    reason,
+  });
+  return data;
+}

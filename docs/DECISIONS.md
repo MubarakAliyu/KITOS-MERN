@@ -301,3 +301,81 @@ list only when it is a retained palette colour that fails *at rest*, and only af
 been checked first — in this batch the parent dashboard also failed on its child names and ages, and
 that was the scan sampling a half-faded card mid-fetch, not a colour. The waiting was fixed; nothing
 was exempted for it. Anything that is not a palette pair at rest is a regression, as ADR-020 says.
+
+## ADR-030 — Chat is an allow-list of pairs, not a deny-list
+**Status:** Accepted. `chat.service.js` holds the six pairs PRD §10 names —
+admin↔admin, admin↔instructor, admin↔parent, admin↔student, instructor↔parent and
+instructor↔student — and refuses everything else with 403. Student↔instructor carries the extra
+condition that they share a course, re-checked on every send rather than only when the thread opened,
+so unenrolling a child closes the thread with it.
+
+An allow-list is the only shape of this rule that fails safe. A deny-list of "no student↔student"
+would have permitted every combination nobody thought about, and the one that matters is exactly the
+one nobody thinks about: a new role, a seeded account with an odd role, a pair that becomes possible
+when some later feature introduces it.
+
+The cost is that pairs which look harmless are refused too, and this is deliberate rather than
+overlooked:
+
+- **instructor↔instructor** and **parent↔parent** — staff coordination and parent-to-parent contact
+  both go through an administrator, who may talk to anyone. A platform for children is not the place
+  for an unmonitored adult-to-adult channel that nobody asked for.
+- **parent↔their own child** — they live in the same house. In-app chat between them would add a
+  thread an administrator has to monitor for no benefit, and the parent already reads every
+  conversation their child has.
+
+`GET /chat/contacts` answers "who may I talk to?" from the same table, so the rule is enumerable and
+testable rather than something the client has to guess.
+
+## ADR-031 — The socket relays an already-persisted message rather than writing a second one
+**Status:** Accepted. The retained `useChat.js` persists through `POST /messages` and *then* emits
+`message` down the socket. A server that wrote on the socket event as well would store every message
+twice.
+
+So the handler checks first: a payload carrying the id of a message that already exists is relayed to
+the room and not written again. Anything else — a client with a socket and no REST call — goes through
+the same `postMessage` service the route uses, so no socket client can bypass the pair rules.
+
+This is the frontend contract winning over the batch brief's "persist first, then emit" (the ADR-021
+precedent). Both halves are needed: without the first, the retained UI duplicates everything; without
+the second, the socket would be a write path with no rules on it.
+
+Messages reach a recipient through their own `user:<id>` room as well as the conversation room,
+because the recipient usually has the conversation *list* open rather than that thread. Typing
+indicators go only to the conversation room, which is why `useChat` joins it when a thread opens.
+
+## ADR-032 — Submission uses the default Vercel and Render URLs
+**Status:** Accepted (decided by the product owner, 21 Nov 2026). The public link for the checkpoint is
+the Vercel project's own URL, with the API on its Render URL. `lms.kidsintech.school` and
+`api.kidsintech.school` need DNS access that is not needed for submission, so they are written up in
+`docs/DEPLOYMENT.md` as an optional later step and nothing depends on them.
+
+This keeps PRD §17's first open question off the critical path: a custom domain adds a DNS wait and a
+certificate issue to the one deadline that cannot move.
+
+## ADR-033 — Course fees stay as seeded, ₦15,000 to ₦25,000
+**Status:** Accepted (decided by the product owner, 21 Nov 2026). The amounts the frontend's fixtures
+used are the amounts the seed uses and the amounts Paystack is charged in test mode. They are stored
+as integer kobo (ADR-002) and read from the course, never from the browser.
+
+They are demonstration figures, not a published price list, and `docs/DEPLOYMENT.md` says so.
+
+## ADR-034 — Hausa strings ship as written, pending a native-speaker review
+**Status:** Accepted (decided by the product owner, 21 Nov 2026). The Hausa translations in the
+retained frontend ship as they are. They have not been reviewed by a native speaker, and that is
+recorded under limitations in `docs/PROGRESS.md` and in the submission report rather than being
+presented as finished work.
+
+Shipping an unreviewed translation is a documented limitation; shipping it silently would be a claim
+about quality nobody has checked. English remains the default, so no child meets the Hausa strings
+unless they choose them.
+
+## ADR-035 — The sender is whatever the provider verified; replies go to the school
+**Status:** Accepted (decided by the product owner, 21 Nov 2026). `MAIL_FROM` is whichever address is
+verified in Brevo or Gmail, which may not be a Kids In Tech address at all. `MAIL_REPLY_TO` defaults
+to `hello@kidsintech.school` and is set on every message.
+
+A transactional provider will only send as an address it has verified, and verifying a KIT address
+needs DNS records on a domain the project may not control in time (ADR-032). Parents do reply to
+"your child's account is ready" and "here is your receipt", so the reply has to reach the school even
+when the envelope sender cannot be theirs. Splitting the two is how that works without waiting on DNS.

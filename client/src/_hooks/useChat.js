@@ -61,6 +61,11 @@ export function useChat(userId) {
     function handleConnect() {
       setSocketConnected(true);
       socket.emit("join", { userId });
+      // Rejoin the open thread: a reconnection starts with empty rooms, and
+      // without this typing indicators stop arriving after a brief drop.
+      if (activeConvIdRef.current) {
+        socket.emit("join", { conversation_id: activeConvIdRef.current });
+      }
     }
     function handleDisconnect() {
       setSocketConnected(false);
@@ -123,6 +128,21 @@ export function useChat(userId) {
     // toast/store changes would be wasteful.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  /**
+   * Join the open thread's room.
+   *
+   * Messages reach a recipient through their own user room either way, but
+   * typing indicators are relayed to the conversation room only — nobody who
+   * has not joined it hears them.
+   */
+  useEffect(() => {
+    if (!activeConvId) return;
+    const socket = getSocket();
+    if (socket?.connected) {
+      socket.emit("join", { conversation_id: activeConvId });
+    }
+  }, [activeConvId]);
 
   // Lazy-load messages for the active conversation + mark them read.
   useEffect(() => {

@@ -65,12 +65,6 @@ placeholderRouter.get(
   })
 );
 
-// ── Batch 3: chat ───────────────────────────────────────────────────────────
-
-placeholderRouter.get("/conversations", empty([]));
-placeholderRouter.get("/messages", empty([]));
-placeholderRouter.get("/admin/chat/all-conversations", empty([]));
-
 // ── Batch 3: analytics ──────────────────────────────────────────────────────
 
 /**
