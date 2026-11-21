@@ -82,6 +82,16 @@ at about 3:1 on a 12% tint of itself. Nothing was restyled. The parent dashboard
 its child names and ages, and that one was the scan sampling a half-faded card mid-fetch: the harness
 now waits for the loading placeholders to clear before scanning, and no colour was exempted for it.
 
+**Mongoose upgraded to 8.24.10 at merge time**
+
+CI's production audit went red on `main` against the same tree that had been green on the branch:
+four high-severity Mongoose advisories were published in between, so the clock had changed, not the
+code. Two bear directly on this project — connection-level `sanitizeFilter` not being applied
+(GHSA-gg4r-jv3p-qx3c), which is the mechanism keeping Mongo operator keys out of queries, and
+prototype pollution through `Schema.virtual()` (GHSA-6972-9mcm-vhwj). 8.24.10 is the last of the 8.x
+line and fixes all four without the 9.x major upgrade, which is not this batch's business. All 418
+server tests pass unchanged.
+
 **Known limitation of the seed (ADR-028)**
 
 `npm run seed` places one class five minutes in the past, sixty minutes long. The live banner, the QR
