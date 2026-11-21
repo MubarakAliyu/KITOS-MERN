@@ -251,3 +251,224 @@ export const sendNotificationBody = z
     priority: z.boolean().optional(),
   })
   .passthrough();
+
+// ── Batch 2: courses, modules, lessons ──────────────────────────────────────
+
+const courseTitle = z
+  .string({ error: "A title is required" })
+  .trim()
+  .min(3, "Title must be at least 3 characters")
+  .max(160, "Title must be 160 characters or fewer");
+
+export const listCoursesQuery = z.object({
+  status: z.enum(["draft", "published"]).optional(),
+  programme_track: z.string().trim().max(60).optional(),
+  q: z.string().trim().max(120).optional(),
+});
+
+export const createCourseBody = z
+  .object({
+    title: courseTitle,
+    description: z.string().trim().max(2000).optional(),
+    thumbnail: z.string().trim().max(500).nullish(),
+    programme_track: z.string().trim().min(1, "A programme track is required"),
+    instructor_id: objectIdSchema.optional(),
+    status: z.enum(["draft", "published"]).optional(),
+    price: z.coerce.number().min(0).optional(),
+    price_kobo: z.coerce.number().int().min(0).optional(),
+    payment_type: z.enum(["subscription", "one_time"]).optional(),
+  })
+  .strict();
+
+export const updateCourseBody = createCourseBody.partial().strict();
+
+export const createModuleBody = z
+  .object({
+    course_id: objectIdSchema,
+    title: courseTitle,
+    order_index: z.coerce.number().int().min(1).optional(),
+  })
+  .strict();
+
+const lessonResource = z.object({
+  title: z.string().trim().min(1).max(160),
+  url: z.string().trim().url("Enter a valid URL"),
+});
+
+export const createLessonBody = z
+  .object({
+    module_id: objectIdSchema,
+    title: courseTitle,
+    content_type: z.enum(["video", "text"]).optional(),
+    youtube_url: z.string().trim().max(500).nullish(),
+    // Rich text: length-capped here, sanitised in the service.
+    body_content: z.string().max(100000).optional(),
+    resources: z.array(lessonResource).max(20).optional(),
+    order_index: z.coerce.number().int().min(1).optional(),
+    duration_minutes: z.coerce.number().int().min(1).max(600).nullish(),
+  })
+  .strict();
+
+export const updateLessonBody = createLessonBody
+  .partial()
+  .omit({ module_id: true })
+  .strict();
+
+// ── Batch 2: assessment ─────────────────────────────────────────────────────
+
+const quizQuestion = z.object({
+  question_text: z.string().trim().min(1, "A question needs text").max(500),
+  question_type: z.enum(["mcq", "true_false"]).optional(),
+  options: z.array(z.string().trim().max(200)).max(8).optional(),
+  correct_answer: z.string().trim().min(1, "Mark the correct answer").max(200),
+});
+
+export const createQuizBody = z
+  .object({
+    module_id: objectIdSchema,
+    lesson_id: objectIdSchema.nullish(),
+    title: courseTitle,
+    order_index: z.coerce.number().int().min(1).optional(),
+    questions: z.array(quizQuestion).max(50).optional(),
+  })
+  .strict();
+
+export const updateQuizBody = createQuizBody
+  .partial()
+  .omit({ module_id: true })
+  .strict();
+
+export const submitQuizBody = z
+  .object({
+    quiz_id: objectIdSchema,
+    // Keyed by question id; the service decides what is correct.
+    answers: z.record(z.string(), z.string().max(200)).default({}),
+  })
+  .strict();
+
+export const createAssignmentBody = z
+  .object({
+    module_id: objectIdSchema,
+    title: courseTitle,
+    instructions: z.string().trim().max(4000).optional(),
+    deadline: z.string().trim().max(40).nullish(),
+  })
+  .strict();
+
+export const updateAssignmentBody = createAssignmentBody
+  .partial()
+  .omit({ module_id: true })
+  .strict();
+
+export const submitAssignmentBody = z
+  .object({
+    assignment_id: objectIdSchema,
+    // The client calls it `kind`; the schema calls it `submission_type`.
+    kind: z.enum(["text", "link", "file"]).optional(),
+    submission_type: z.enum(["text", "link", "file"]).optional(),
+    content: z.string().max(10000).optional(),
+    link: z.string().trim().max(500).optional(),
+    file_name: z.string().trim().max(200).optional(),
+    file: z
+      .object({
+        name: z.string().trim().max(200),
+        // Base64; the 10 MB cap is enforced on the decoded bytes in storage.
+        data: z.string().max(15_000_000),
+      })
+      .optional(),
+  })
+  .strict();
+
+export const assignmentFeedbackBody = z
+  .object({
+    student_id: objectIdSchema.optional(),
+    submission_id: objectIdSchema.optional(),
+    grade: z.union([z.string().trim().max(20), z.number()]).nullish(),
+    feedback: z.string().trim().max(4000).optional(),
+  })
+  .strict();
+
+export const enrolBody = z
+  .object({
+    student_id: objectIdSchema,
+    course_id: objectIdSchema,
+  })
+  .strict();
+
+// ── Batch 2: sessions ───────────────────────────────────────────────────────
+
+export const listSessionsQuery = z.object({
+  filter: z.enum(["all", "live", "upcoming", "completed", "cancelled"]).optional(),
+});
+
+export const createSessionBody = z
+  .object({
+    title: courseTitle,
+    description: z.string().trim().max(2000).optional(),
+    course_id: objectIdSchema,
+    cohort_id: objectIdSchema.nullish(),
+    instructor_id: objectIdSchema.optional(),
+    scheduled_at: z.string({ error: "A date and time is required" }).trim().min(1),
+    duration_minutes: z.coerce.number().int().min(5).max(480).optional(),
+    session_number: z.coerce.number().int().min(1).nullish(),
+    mode: z.enum(["online", "physical", "hybrid"]).optional(),
+    meeting_url: z.string().trim().max(500).nullish(),
+    venue: z.string().trim().max(200).nullish(),
+    max_students: z.coerce.number().int().min(1).max(500).nullish(),
+  })
+  .strict();
+
+export const updateSessionBody = createSessionBody
+  .partial()
+  .omit({ course_id: true })
+  .strict();
+
+export const cancelSessionBody = z
+  .object({ reason: z.string().trim().max(500).optional() })
+  .strict();
+
+export const rescheduleSessionBody = z
+  .object({ scheduled_at: z.string().trim().min(1, "A new date and time is required") })
+  .strict();
+
+export const saveAttendanceBody = z
+  .object({
+    records: z
+      .array(
+        z.object({
+          student_id: objectIdSchema,
+          status: z.enum(["present", "absent", "late", "excused"]),
+        })
+      )
+      .max(500),
+  })
+  .strict();
+
+export const checkInBody = z
+  .object({
+    token: z.string().trim().max(2000).optional(),
+    method: z.enum(["qr", "auto"]).optional(),
+  })
+  .strict();
+
+export const addRecordingBody = z
+  .object({
+    title: z.string().trim().max(160).optional(),
+    url: z.string().trim().url("Enter a valid URL"),
+    source: z.enum(["youtube", "drive", "other"]).optional(),
+  })
+  .strict();
+
+export const adminSessionsQuery = z.object({
+  status: z.enum(["all", "scheduled", "live", "completed", "cancelled"]).optional(),
+  course_id: objectIdSchema.optional(),
+  instructor_id: objectIdSchema.optional(),
+});
+
+/** The verification code is 10 unambiguous characters. */
+export const verifyCodeParam = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9]{6,16}$/, "That does not look like a verification code"),
+});

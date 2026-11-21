@@ -66,8 +66,8 @@ studentSchema.index({ parent_id: 1, created_at: 1 });
  * The child shape the parent dashboard reads (handlers.js `PARENT_CHILDREN`).
  *
  * `programme_track` goes out as the display label the retained UI renders, and
- * the progress counters are passed in by the service — they come from the
- * enrollments collection, which arrives in Batch 2, so they are 0 until then.
+ * the progress counters are passed in by the service, which reads them from
+ * the enrolments.
  */
 studentSchema.methods.toParentJSON = function toParentJSON(extra = {}) {
   return {
@@ -77,6 +77,9 @@ studentSchema.methods.toParentJSON = function toParentJSON(extra = {}) {
     age: this.age,
     programme_track: toTrackLabel(this.programme_track),
     avatar_initial: avatarInitial(this.name),
+    // Overridden by `extra`, which the service fills from the enrolments.
+    // Zero here is the shape, not a claim: a caller that does not pass them
+    // renders "no courses yet", which is true of a child with none.
     enrolled_courses: 0,
     completed_courses: 0,
     status: this.status,

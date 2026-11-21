@@ -195,3 +195,109 @@ from its own module location. The first implementation used `path.resolve("serve
 relative to the **working directory** — already `server/` when npm runs a script — so the local MongoDB
 data landed in `server/server/.local`, outside the `.gitignore` rule and in a different place again
 depending on where the process was started.
+
+## ADR-023 — A session's status is computed from the clock, never stored
+**Status:** Accepted. `computeSessionStatus(session, now)` derives `live`, `scheduled`, `completed` or
+`cancelled` from `scheduled_at`, `duration_minutes` and the cancellation flag, on every read. Only the
+cancellation is a stored fact, because only it is a decision someone made.
+
+The alternative was a stored `status` column kept current by a scheduled job. That needs something to
+run every minute, forever, on a free Render instance that sleeps — and the moment it misses a tick the
+database says a class is still scheduled while children are sitting in it. A computed status cannot
+drift, needs nothing running, and is correct the instant the clock passes the start time.
+
+The cost is that status cannot be queried in Mongo directly, so `?filter=live` is applied after the
+documents are read. At this school's scale — a few dozen classes a term — that is nothing, and the
+filter lives in one place.
+
+## ADR-024 — Lesson HTML is sanitised on the way in, and again by the renderer
+**Status:** Accepted. An instructor writes lesson bodies in a rich-text editor, so the content is HTML
+and must stay HTML. `sanitizeLessonHtml` allows a small set of structural and formatting tags and
+nothing else: no `<script>`, no event handlers, no `style`, and iframes only for a normalised YouTube
+embed. It runs in the service, so the stored document is already clean.
+
+Sanitising on write rather than on read means a body cannot be stored dangerous and rendered
+dangerously later by some new code path that forgot to escape it. The client still treats the field as
+untrusted — two cheap defences against the one failure that would be unforgivable here, since the
+readers are children.
+
+## ADR-025 — Instructors author; only an administrator publishes
+**Status:** Accepted. `course.edit` belongs to admin and instructor, so an instructor may write
+modules, lessons, quizzes and assignments on a course assigned to them. `course.publish` and
+`course.create` belong to admin alone.
+
+Publishing is what puts a course in front of children and makes it payable, which is the school's
+decision, not a teacher's. It also gives a draft a real purpose: an instructor can build a course in
+the open over several weeks, and a student asking for it gets a 404 — not a 403, because confirming
+that a draft exists leaks what the school is preparing.
+
+Publishing an empty course is refused outright. A listing with no lessons behind it is worse than no
+listing.
+
+## ADR-026 — Whatever finishes a course issues the certificate
+**Status:** Accepted. `recalculateAndCertify` recalculates progress and, if that crossed into
+completion, issues the certificate. Lesson completion, quiz submission and assignment submission all
+go through it.
+
+Originally only lesson completion issued one. That looked like a gap of timing and was in fact a
+permanent loss: `justCompleted` is the edge from unfinished to finished, and once the enrolment reads
+`completed` the edge never fires again. A child whose last outstanding piece of work was a quiz or an
+assignment — the normal shape of a course ending in either — finished, was told they had finished, and
+never received the certificate they had earned. No later action could recover it.
+
+The rule therefore lives in exactly one function rather than at each call site, because the failure
+was a call site forgetting it.
+
+## ADR-027 — A deleted course keeps its certificates
+**Status:** Accepted. Deleting a course cascades to its modules, lessons, quizzes, assignments,
+submissions, quiz attempts, lesson completions, enrolments, sessions, attendance marks and recordings.
+Certificates are left alone.
+
+Everything in the cascade describes work in progress, and an orphan of it would corrupt something live:
+an abandoned attendance mark still counts in the attendance report, an orphan enrolment still skews a
+denominator. A certificate is not work in progress. It is a record of something a child did, with
+their name and the course title snapshotted onto it, and a copy quite possibly printed and on a wall
+at home. A school retiring last year's syllabus must not void the certificates it awarded for it, or
+silently break the verification code printed on them.
+
+## ADR-028 — The seeded live class lasts an hour, so the seed is re-run, not relied upon
+**Status:** Accepted. `npm run seed` places one class relative to the moment it runs: started five
+minutes ago, sixty minutes long. For about an hour afterwards the live banner, the QR display and
+check-in are all demonstrable; after that the class reads `completed` and the live paths have nothing
+to show.
+
+This follows from ADR-023 rather than being a separate choice: if status is the clock, a seeded live
+class is only live for as long as a real one would be. Fixing it by writing a `live` status into the
+seed would mean the seeded row disagreed with every computed one.
+
+What follows for anyone working on this:
+
+- Re-run `npm run seed` before demonstrating or screenshotting the live paths.
+- No automated test may depend on the seed being live. The Playwright journeys schedule their own
+  class relative to `now` and wait for it to start, which is why one of them takes two minutes.
+- `/student/sessions` opens on its Live tab, which is right for a child arriving at class time but
+  reads as an empty screen an hour after seeding. It is not.
+
+## ADR-029 — One tenth pair joins the ADR-020 contrast exemption, and why that is not a precedent
+**Status:** Accepted. ADR-020 fixed the exemption at nine colour pairs and said accessibility work in
+later batches must not widen it. This batch widens it by one: the teal `#0EA5A5` of the "In Progress"
+chip on a child's course card, over a 12% tint of itself, at about 3:1.
+
+ADR-020 is accepted and append-only, so this records the change rather than editing it.
+
+**Why it appeared now.** The chip is part of the retained design and was always in the code. It was
+unreachable: `GET /students/:id/progress` returned a hard-coded empty array, so every card on the
+parent's dashboard read "Not Started" in grey. The moment real progress arrived, a child mid-course
+rendered the chip for the first time. Nothing was restyled and no colour was chosen here.
+
+**Why it is exempted rather than fixed.** It is the same decision ADR-020 already made, applied to the
+same palette: the three chip colours are the brand's, the shortfall is accepted knowingly, and
+changing one of them is the redesign the PRD forbids. Fixing it would also be inconsistent — the
+"Completed" chip beside it is white on the same emerald that ADR-020 already exempts.
+
+**What has not changed.** The list is still matched per node by exact colour pair, so every other
+contrast failure, and every other serious or critical rule, still fails the build. A pair joins this
+list only when it is a retained palette colour that fails *at rest*, and only after the harness has
+been checked first — in this batch the parent dashboard also failed on its child names and ages, and
+that was the scan sampling a half-faded card mid-fetch, not a colour. The waiting was fixed; nothing
+was exempted for it. Anything that is not a palette pair at rest is a regression, as ADR-020 says.

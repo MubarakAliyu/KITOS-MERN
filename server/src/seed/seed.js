@@ -34,6 +34,28 @@ import {
   SETTINGS,
   DEV_PASSWORDS,
 } from "./data.js";
+import {
+  COURSES,
+  MODULES,
+  ENROLMENTS,
+  SESSIONS,
+} from "./courses.js";
+import { Course } from "../models/Course.js";
+import { Module } from "../models/Module.js";
+import { Lesson } from "../models/Lesson.js";
+import { Quiz } from "../models/Quiz.js";
+import { QuizAttempt } from "../models/QuizAttempt.js";
+import { Assignment } from "../models/Assignment.js";
+import { Submission } from "../models/Submission.js";
+import { Enrollment } from "../models/Enrollment.js";
+import { LessonCompletion } from "../models/LessonCompletion.js";
+import { Certificate } from "../models/Certificate.js";
+import { Session } from "../models/Session.js";
+import { Attendance } from "../models/Attendance.js";
+import { Recording } from "../models/Recording.js";
+import { nairaToKobo } from "../lib/serialize.js";
+import { recalculateProgress } from "../services/progress.service.js";
+import { issueCertificate } from "../services/enrollment.service.js";
 
 /**
  * Rebuilds the demo world (Batch 1 Part F).
@@ -119,6 +141,19 @@ async function clearCollections() {
     ActivityLog.deleteMany({}),
     Counter.deleteMany({}),
     Setting.deleteMany({}),
+    Course.deleteMany({}),
+    Module.deleteMany({}),
+    Lesson.deleteMany({}),
+    Quiz.deleteMany({}),
+    QuizAttempt.deleteMany({}),
+    Assignment.deleteMany({}),
+    Submission.deleteMany({}),
+    Enrollment.deleteMany({}),
+    LessonCompletion.deleteMany({}),
+    Certificate.deleteMany({}),
+    Session.deleteMany({}),
+    Attendance.deleteMany({}),
+    Recording.deleteMany({}),
   ]);
 }
 
@@ -242,12 +277,228 @@ export async function runSeed({ quiet = false } = {}) {
       await profile.save();
     }
 
-    createdStudents.push({ admissionNo, ...student });
+    createdStudents.push({ admissionNo, profileId: profile._id, ...student });
   }
 
   // Move the counter past the hand-written numbers, so the first
   // admin-created student gets the next free slot instead of colliding.
   await ensureSequenceAtLeast(admissionCounterKey(year), sequence);
+
+  // ── Courses, modules, lessons, quizzes, assignments ──────────────────────
+  say("Creating courses and content…");
+
+  const studentIdByKey = new Map(
+    createdStudents.map((entry) => [entry.key, entry.profileId])
+  );
+
+  const courseIds = new Map();
+  for (const course of COURSES) {
+    const doc = await Course.create({
+      title: course.title,
+      description: course.description,
+      programme_track: course.programme_track,
+      instructor_id: instructorIds.get(course.instructor),
+      status: course.status,
+      price_kobo: nairaToKobo(course.price),
+      payment_type: course.payment_type,
+    });
+    courseIds.set(course.key, doc._id);
+  }
+
+  // Kept in order, so "the first N lessons" below means something.
+  const lessonsByCourse = new Map();
+
+  for (const module of MODULES) {
+    const courseId = courseIds.get(module.course);
+    const moduleDoc = await Module.create({
+      course_id: courseId,
+      title: module.title,
+      order_index: module.order_index,
+    });
+
+    let lessonIndex = 1;
+    for (const lesson of module.lessons ?? []) {
+      const lessonDoc = await Lesson.create({
+        module_id: moduleDoc._id,
+        course_id: courseId,
+        title: lesson.title,
+        content_type: lesson.content_type,
+        youtube_url: lesson.youtube_url ?? null,
+        body_content: lesson.body_content,
+        order_index: lessonIndex,
+        duration_minutes: lesson.duration_minutes ?? null,
+      });
+      lessonIndex += 1;
+
+      const key = String(courseId);
+      if (!lessonsByCourse.has(key)) lessonsByCourse.set(key, []);
+      lessonsByCourse.get(key).push(lessonDoc);
+    }
+
+    if (module.quiz) {
+      await Quiz.create({
+        module_id: moduleDoc._id,
+        course_id: courseId,
+        title: module.quiz.title,
+        order_index: module.order_index,
+        questions: module.quiz.questions.map((question) => ({
+          question_text: question.question_text,
+          question_type: question.question_type ?? "mcq",
+          options:
+            question.question_type === "true_false"
+              ? ["True", "False"]
+              : question.options,
+          correct_answer: question.correct_answer,
+        })),
+      });
+    }
+
+    if (module.assignment) {
+      await Assignment.create({
+        module_id: moduleDoc._id,
+        course_id: courseId,
+        title: module.assignment.title,
+        instructions: module.assignment.instructions,
+        deadline: new Date(
+          Date.now() + module.assignment.deadline_days * 24 * 60 * 60 * 1000
+        ),
+      });
+    }
+  }
+
+  // ── Enrolments, with some work already done ──────────────────────────────
+  say("Enrolling students and recording progress…");
+
+  let certificatesIssued = 0;
+
+  for (const entry of ENROLMENTS) {
+    const studentId = studentIdByKey.get(entry.student);
+    const courseId = courseIds.get(entry.course);
+    if (!studentId || !courseId) continue;
+
+    await Enrollment.create({
+      student_id: studentId,
+      course_id: courseId,
+      status: "active",
+      source: "seed",
+      progress: 0,
+      last_activity_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+    });
+
+    const lessons = lessonsByCourse.get(String(courseId)) ?? [];
+
+    const take = entry.completed
+      ? lessons.length
+      : Math.min(entry.progressLessons ?? 0, lessons.length);
+
+    for (const lesson of lessons.slice(0, take)) {
+      await LessonCompletion.create({
+        student_id: studentId,
+        lesson_id: lesson._id,
+        course_id: courseId,
+        completed_at: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
+    }
+
+    // Finishing a course means every quiz passed and every assignment in, or
+    // the progress service will not call it complete.
+    if (entry.completed) {
+      const quizzes = await Quiz.find({ course_id: courseId });
+      for (const quiz of quizzes) {
+        const answers = quiz.questions.map((question) => ({
+          question_id: String(question._id),
+          answer: question.correct_answer,
+          correct: true,
+        }));
+        await QuizAttempt.create({
+          quiz_id: quiz._id,
+          student_id: studentId,
+          course_id: courseId,
+          answers,
+          score: answers.length,
+          total: answers.length,
+          percentage: 100,
+          attempts: 1,
+        });
+      }
+
+      const assignments = await Assignment.find({ course_id: courseId });
+      for (const assignment of assignments) {
+        await Submission.create({
+          assignment_id: assignment._id,
+          student_id: studentId,
+          course_id: courseId,
+          submission_type: "link",
+          content: "https://scratch.mit.edu/projects/demo",
+          // One reviewed submission, so the instructor queue shows both states.
+          status: "reviewed",
+          grade: "A",
+          feedback:
+            "Lovely work — the three sprites move independently and the sounds are well timed. Try adding a score next.",
+          reviewed_by: instructorIds.get("sarah"),
+          reviewed_at: new Date(Date.now() - 12 * 60 * 60 * 1000),
+        });
+      }
+    }
+
+    const { justCompleted } = await recalculateProgress({
+      studentId,
+      courseId,
+    });
+
+    if (justCompleted) {
+      await issueCertificate({ studentId, courseId });
+      certificatesIssued += 1;
+    }
+  }
+
+  // ── Sessions, attendance and recordings ──────────────────────────────────
+  say("Scheduling sessions…");
+
+  for (const entry of SESSIONS) {
+    const courseId = courseIds.get(entry.course);
+    if (!courseId) continue;
+
+    const session = await Session.create({
+      title: entry.title,
+      description: entry.description,
+      course_id: courseId,
+      instructor_id: instructorIds.get(entry.instructor),
+      // Relative to now, so the demo never goes stale.
+      scheduled_at: new Date(Date.now() + entry.offsetMinutes * 60 * 1000),
+      duration_minutes: entry.duration_minutes,
+      session_number: entry.session_number ?? null,
+      mode: entry.mode,
+      meeting_url: entry.meeting_url ?? null,
+      venue: entry.venue ?? null,
+      status: entry.cancelled ? "cancelled" : "scheduled",
+      cancel_reason: entry.cancel_reason ?? null,
+      cancelled_at: entry.cancelled ? new Date() : null,
+    });
+
+    for (const mark of entry.attendance ?? []) {
+      const studentId = studentIdByKey.get(mark.student);
+      if (!studentId) continue;
+      await Attendance.create({
+        session_id: session._id,
+        student_id: studentId,
+        status: mark.status,
+        method: mark.method,
+        marked_by: instructorIds.get(entry.instructor),
+        marked_at: new Date(Date.now() + entry.offsetMinutes * 60 * 1000),
+      });
+    }
+
+    if (entry.recording) {
+      await Recording.create({
+        session_id: session._id,
+        title: entry.recording.title,
+        url: entry.recording.url,
+        source: entry.recording.source,
+        added_by: instructorIds.get(entry.instructor),
+      });
+    }
+  }
 
   // ── Settings ─────────────────────────────────────────────────────────────
   say("Writing platform settings…");
@@ -271,6 +522,11 @@ export async function runSeed({ quiet = false } = {}) {
     parents: PARENTS.length,
     students: STUDENTS.length,
     cohorts: COHORTS.length,
+    courses: COURSES.length,
+    modules: MODULES.length,
+    enrolments: ENROLMENTS.length,
+    sessions: SESSIONS.length,
+    certificates: certificatesIssued,
     firstAdmission: createdStudents[0]?.admissionNo,
     lastAdmission: createdStudents.at(-1)?.admissionNo,
     passwordSource: passwords.source,
@@ -321,6 +577,10 @@ async function main() {
     console.log(`  Parents:     ${summary.parents}`);
     console.log(`  Students:    ${summary.students} (${summary.firstAdmission} … ${summary.lastAdmission})`);
     console.log(`  Cohorts:     ${summary.cohorts}`);
+    console.log(`  Courses:     ${summary.courses} (${summary.modules} modules)`);
+    console.log(`  Enrolments:  ${summary.enrolments}`);
+    console.log(`  Sessions:    ${summary.sessions}`);
+    console.log(`  Certificates: ${summary.certificates}`);
     console.log(`  Passwords:   ${summary.passwordSource}`);
 
     if (!isProduction()) {

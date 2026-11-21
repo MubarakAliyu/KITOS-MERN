@@ -5,6 +5,7 @@ import { env } from "./config/env.js";
 import { connectDb, disconnectDb } from "./config/db.js";
 import { logger } from "./lib/logger.js";
 import { loadPermissionOverrides } from "./services/settings.service.js";
+import { startReminderJob, stopReminderJob } from "./jobs/reminders.js";
 import "./models/index.js";
 
 /**
@@ -20,6 +21,11 @@ async function main() {
 
   const app = createApp();
   const server = http.createServer(app);
+
+  // Session reminders and overdue notices. Runs once now and then every five
+  // minutes, so a restart catches up on anything missed while asleep — which
+  // matters on Render's free tier, where the service does sleep.
+  startReminderJob();
 
   // Socket.IO attaches to this same server in Batch 3 (PRD §7.1).
 
@@ -47,6 +53,8 @@ async function main() {
       process.exit(1);
     }, 10000);
     force.unref();
+
+    stopReminderJob();
 
     server.close(async (err) => {
       if (err) logger.error({ err }, "Error closing HTTP server");

@@ -52,7 +52,10 @@ export function useChat(userId) {
   // Socket lifecycle. Best-effort connect; UI keeps working if it fails.
   useEffect(() => {
     if (!userId) return;
+    // Null until a Socket.IO endpoint is configured (Batch 3). The chat
+    // surfaces already fall back to local state with an offline banner.
     const socket = getSocket();
+    if (!socket) return;
     socket.connect();
 
     function handleConnect() {
@@ -207,7 +210,7 @@ export function useChat(userId) {
         });
 
         const socket = getSocket();
-        if (socket.connected) {
+        if (socket?.connected) {
           socket.emit("message", {
             ...saved,
             conversation_id: activeConvId,
@@ -230,7 +233,7 @@ export function useChat(userId) {
   const emitTyping = useCallback(() => {
     if (!activeConvId) return;
     const socket = getSocket();
-    if (socket.connected) {
+    if (socket?.connected) {
       socket.emit("typing", {
         userId,
         conversationId: activeConvId,

@@ -1,7 +1,8 @@
 # KITOS 2.0 — API reference
 
 Every endpoint implemented so far. Batch 1 covers authentication, accounts, families and platform
-settings; Batches 2 and 3 add learning content, sessions, chat and payments.
+settings; Batch 2 adds courses and content, the work a child does, certificates and the live and
+hybrid sessions; Batch 3 will add chat and payments.
 
 **Base URL** — `NEXT_PUBLIC_API_URL`. No `/api/v1` prefix: the frontend calls `/login`, `/admin/users`
 and so on directly (ADR-005).
@@ -351,24 +352,353 @@ Data Protection Act 2023.
 
 ### `GET /students/:id/progress` — `content.read`
 
-Per-course progress. Ownership is enforced in the service as well as by the matrix: a parent may read
-only their own children, a student only their own record, an admin anyone. An instructor passes on the
-matrix alone until enrolments arrive in Batch 2 (ADR-014). 403 otherwise.
+Per-course progress, one row per enrolment. Ownership is enforced in the service as well as by the
+matrix: a parent may read only their own children, a student only their own record, an admin anyone,
+and an instructor only a child enrolled on one of their own courses (the narrowing ADR-014 deferred
+to Batch 2). 403 otherwise.
 
-Returns `[]` in Batch 1 — progress is computed from enrolments and lesson completions, both of which
-arrive in Batch 2, so the parent dashboard renders its empty state.
+```json
+[{ "course_id": "6ada…", "course_title": "Scratch Programming",
+   "instructor_name": "Ms. Sarah Aliyu", "progress": 100,
+   "modules_completed": 8, "modules_total": 8,
+   "last_active": "2026-10-31T21:20:28.861Z", "status": "completed" }]
+```
+
+`modules_completed` and `modules_total` count completable items — lessons, quizzes and assignments —
+which is what the screen labels "modules".
 
 ### `GET /instructors/me` — instructor
 
 ```json
 { "id": "6ada…", "user_id": "6ada…", "name": "Ms. Sarah Aliyu",
   "email": "instructor@kidsintech.school", "bio": "…", "avatar_initial": "S",
-  "courses_count": 0, "students_count": 0, "joined": "2026-10-22" }
+  "courses_count": 2, "students_count": 6, "joined": "2026-10-22" }
 ```
 
-### `GET /instructors/me/courses` · `GET /instructors/me/students`
+`students_count` counts distinct children: one pupil on three of their courses is one pupil.
 
-`[]` until Batch 2.
+### `GET /instructors/me/courses`
+
+The courses assigned to them, in the `GET /courses` shape below.
+
+### `GET /instructors/me/students`
+
+One row per child they teach — not per enrolment — carrying `student_id`, `admission_no`,
+`enrolled_courses` (course ids), `enrolled_courses_details`, quiz scores and averages, and the
+assignments completed and outstanding.
+
+### `GET /instructors/me/sessions`
+
+Their own classes, in the `GET /sessions` shape below.
+
+---
+
+## Courses and content
+
+### `GET /courses` — `content.read`
+
+Every course a student may see is a published one they are enrolled on; an instructor and an admin
+see all of them. `progress` is present for a student, absent otherwise.
+
+```json
+[{ "id": "6ada…", "title": "Scratch Programming", "description": "…",
+   "thumbnail_url": null, "price": 15000, "price_kobo": 1500000,
+   "payment_type": "subscription", "instructor_id": "6ada…",
+   "instructor_name": "Ms. Sarah Aliyu", "programme_track": "Scratch Programming",
+   "status": "published", "is_published": true,
+   "modules_count": 3, "lessons_count": 5, "students_count": 4,
+   "completion_rate": 35, "progress": 100, "created_at": "2026-11-02T21:20:28.617Z" }]
+```
+
+`price` is naira for display; `price_kobo` is the stored integer (ADR-002). `module_count` and
+`modules_count` are both present because the retained screens read each, and likewise `thumbnail`
+and `thumbnail_url`.
+
+### `GET /courses/:id/modules` — `content.read`
+
+Modules in order, each with `lessons_count`, `quiz_id` and `assignment_id` (null where absent).
+
+A draft course 404s for a student rather than 403 — confirming that a draft exists is itself a small
+leak of what the school is preparing. A published course they are not enrolled on is 403.
+
+### `GET /modules/:id/lessons` · `GET /lessons/:id` — `content.read`
+
+Lesson bodies are sanitised HTML (ADR-024). `GET /lessons/:id` adds `completed` for a student.
+
+### `POST /courses` · `POST /admin/courses` — `course.create`
+
+```json
+{ "title": "Scratch Programming", "description": "…", "programme_track": "scratch",
+  "instructor_id": "6ada…", "price_kobo": 1500000, "payment_type": "subscription" }
+```
+
+`programme_track` is one of `scratch`, `web-development`, `robotics`, `advanced`, and also accepts
+the display label the form submits. 201 with the created course.
+
+### `PUT /admin/courses/:id` — `course.edit` · `DELETE /admin/courses/:id` — `course.create`
+
+Deleting cascades to the course's modules, lessons, quizzes, assignments, submissions, quiz attempts,
+lesson completions, enrolments, sessions, attendance marks and recordings. Certificates are
+deliberately **not** deleted: a child earned theirs against the course as it stood, the name and
+title on it are snapshots, and retiring a course must not void certificates already in a family's
+hands or break the code printed on them.
+
+### `POST /admin/courses/:id/publish` · `…/unpublish` — `course.publish`
+
+Admin only (ADR-025). Publishing a course with no lessons is refused with 400 — an empty listing in
+front of children is worse than no listing.
+
+### `GET /admin/courses/:id/editor` — `course.edit`
+
+The whole course tree in one response: modules, their lessons, quizzes and assignments, for the
+editor screen.
+
+### `POST /modules` · `DELETE /modules/:id` — `course.edit`
+
+An instructor may only touch a course assigned to them; an admin, any. Deleting a module removes its
+lessons, quizzes and assignments, then recalculates every enrolment on the course — the denominator
+has changed for everyone.
+
+### `POST /lessons` · `PUT /lessons/:id` · `DELETE /lessons/:id` — `course.edit`
+
+```json
+{ "module_id": "6ada…", "title": "What is Scratch?", "content_type": "text",
+  "body_content": "<p>…</p>", "video_url": null, "order_index": 1 }
+```
+
+`content_type` is `text`, `video` or `pdf`. A YouTube URL is normalised to its embed form.
+
+### `POST /quizzes` · `PUT /quizzes/:id` · `DELETE /quizzes/:id` — `course.edit`
+
+One quiz per module. Questions carry `question_text`, `question_type` (`mcq` or `true_false`),
+`options` and `correct_answer`.
+
+### `GET /quizzes/:id/questions` — `content.read`
+
+The questions **without** `correct_answer`. Marking happens on the server; a child who opens the
+network tab finds nothing to copy.
+
+---
+
+## Doing the work
+
+### `POST /lessons/:id/complete` — `lesson.complete`
+
+Idempotent: completing twice leaves one record and the same progress.
+
+```json
+{ "success": true, "progress": 100, "course_completed": true, "certificate": { … } }
+```
+
+### `POST /quiz/submit` — `quiz.submit`
+
+```json
+{ "quiz_id": "6ada…", "answers": { "<question_id>": "A sprite" } }
+```
+
+Marked server-side. The best attempt is kept, and `attempts` counts them all.
+
+```json
+{ "success": true, "score": 1, "total": 1, "percentage": 100, "passed": true,
+  "pass_mark": 50, "attempts": 1, "best_percentage": 100,
+  "results": [ … ], "course_completed": true }
+```
+
+A quiz counts toward progress only at or above `pass_mark`.
+
+### `GET /assignments` — student · `POST /assignments/submit` — `assignment.submit`
+
+A submission is a link, a file or written text. Resubmitting puts the work back in the queue and
+clears the old grade — it no longer describes what is there.
+
+### `POST /assignments` · `PUT /assignments/:id` — `course.edit` · `GET /assignments/instructor` · `PUT /assignments/:id/feedback` — `submission.review`
+
+Feedback is checked against the positive-language rule (PRD §10): discouraging wording is
+refused with 422 and a suggested rewording rather than silently softened — the instructor decides
+what to say.
+
+### Progress
+
+One rule, in one place: lessons, passed quizzes and submitted assignments each count equally, and a
+course with no content at all is 0%, never 100%. Any of the three can be the last piece of work, and
+whichever it is issues the certificate.
+
+---
+
+## Certificates
+
+### `GET /certificates` — `content.read`
+
+A student's own; an admin may read any.
+
+```json
+[{ "id": "6ada…", "student_name": "Liam Hassan", "course_title": "Scratch Programming",
+   "instructor_name": "Ms. Sarah Aliyu", "serial": "KIT-CERT-2026-0001",
+   "verification_code": "7QX2M9KD4P", "issued_at": "2026-11-02T21:20:29.000Z",
+   "score_average": 100, "pdf_url": "/certificates/6ada…/pdf", "is_unlocked": true }]
+```
+
+Issued once per student and course, inside a transaction, idempotent under a double click or two
+requests racing to finish the last lesson. The name and course title are snapshots.
+
+### `GET /certificates/:id/pdf` — `content.read`
+
+The certificate as a PDF: landscape A4, the Kids In Tech logo, the serial, the verification code and
+a link to the verification page. The owner, their parent and an admin may fetch it; anyone else 403.
+
+### `GET /certificates/verify/:code` — *Public*
+
+Deliberately unauthenticated: the point is that anyone handed a certificate can check it.
+
+```json
+{ "valid": true, "student_initials": "L.H.", "course_title": "Scratch Programming",
+  "serial": "KIT-CERT-2026-0001", "issued_at": "2026-11-02T21:20:29.000Z" }
+```
+
+Initials only, never a child's name (FR11). An unknown code returns `{ "valid": false }` with 200,
+not 404 — the page's job is to answer the question either way.
+
+---
+
+## Live and hybrid sessions
+
+A session's **status is computed from the clock, never stored**: `live` between its start and its
+end, `completed` after, `scheduled` before, and `cancelled` whatever the time. Nothing has to run on
+a timer for a class to start, and no stored flag can drift out of step with reality.
+
+| Window | Rule |
+|---|---|
+| Live | `scheduled_at` <= now <= `scheduled_at + duration_minutes` |
+| Attendance open | 15 minutes before the start until 24 hours after the end |
+| QR token | 60 seconds |
+
+### `GET /sessions` — `session.view`
+
+`?filter=` one of `all` (default), `live`, `upcoming`, `completed`, `cancelled`. A student sees
+classes on the courses they are enrolled on, an instructor their own, an admin all.
+
+```json
+[{ "id": "6ada…", "title": "Web Development — Week 5", "description": "…",
+   "course_id": "6ada…", "course": "Web Development", "instructor_id": "6ada…",
+   "instructor_name": "Ms. Sarah Aliyu", "scheduled_at": "2026-11-03T21:20:29.010Z",
+   "duration_minutes": 90, "ends_at": "2026-11-03T22:50:29.010Z",
+   "session_number": 5, "mode": "hybrid", "join_url": "https://meet.google.com/…",
+   "venue": "StarNova Labs, Sokoto", "status": "scheduled" }]
+```
+
+`join_url` is only offered while the class is live or about to be.
+
+### `POST /sessions` — `session.manage`
+
+```json
+{ "course_id": "6ada…", "title": "Week 3 — Loops",
+  "scheduled_at": "2026-11-10T15:00:00.000Z",
+  "duration_minutes": 60, "session_number": 3, "mode": "hybrid",
+  "meeting_url": "https://meet.google.com/…", "venue": "…", "max_students": 20 }
+```
+
+`course_id`, not a course name. An instructor may only schedule on a course assigned to them.
+
+### `PUT /sessions/:id` · `POST /sessions/:id/cancel` · `POST /sessions/:id/reschedule` — `session.manage`
+
+The course cannot be changed once a class exists: its register, its recordings and the children who
+can see it all hang off that course. Cancelling takes a `reason` and notifies the enrolled children.
+
+### `GET /sessions/:id/roster` — `attendance.mark`
+
+Every enrolled child with their mark, and the attendance window.
+
+```json
+{ "session_id": "6ada…", "session_title": "Scratch Programming — Week 3",
+  "scheduled_at": "2026-11-02T21:15:29.003Z", "status": "completed",
+  "attendance_open": true,
+  "attendance_opens_at": "2026-11-02T21:00:29.003Z",
+  "attendance_closes_at": "2026-11-03T22:15:29.003Z",
+  "students": [{ "student_id": "6ada…", "name": "Aisha Hassan",
+                 "admission_no": "KIT/26/002", "status": null,
+                 "method": null, "marked_at": null }] }
+```
+
+### `PUT /sessions/:id/attendance` — `attendance.mark`
+
+```json
+{ "records": [{ "student_id": "6ada…", "status": "present" }] }
+```
+
+`status` is `present`, `absent`, `late` or `excused`. A child not enrolled on the course is rejected
+with 400 naming how many were unrecognised, rather than silently skipped. Saving by hand records
+`method: "roster"` and overwrites an earlier self check-in: the instructor in the room is the
+authority on who is there.
+
+Outside the attendance window the request is refused with 403 and the window's own times.
+
+### `POST /sessions/:id/qr-token` — `attendance.mark`
+
+A 60-second token for the instructor to display. Short on purpose: a photograph of the screen passed
+to a friend at home is stale almost immediately.
+
+```json
+{ "token": "…", "expires_in": 60 }
+```
+
+### `POST /sessions/:id/check-in` — student
+
+```json
+{ "token": "…", "method": "qr" }
+```
+
+The class must be live, the child must be enrolled, and a token issued for a different class is
+refused — the obvious way to try to be in two places at once. `method: "auto"` is the mark made when
+a child opens the meeting link, which is attendance enough for an online class (FR13).
+
+### `POST /sessions/:id/recordings` — `recording.add` · `GET /recordings` — `session.view`
+
+```json
+{ "id": "6ada…", "session_id": "6ada…", "session_title": "Scratch Programming — Week 2",
+  "course_id": "6ada…", "course_title": "Scratch Programming",
+  "title": "Scratch Week 2 — recording", "url": "https://www.youtube.com/watch?v=…",
+  "source": "youtube", "recorded_at": "2026-10-30T21:20:29.015Z" }
+```
+
+A child sees recordings for their own courses only.
+
+### `GET /sessions/cancellations` — `session.view`
+
+Recent cancellations, for the notice the dashboards show.
+
+---
+
+## Admin — enrolment and session oversight
+
+### `POST /admin/enrollments` · `POST /admin/enrollments/remove` — `users.manage`
+
+```json
+{ "student_id": "6ada…", "course_id": "6ada…" }
+```
+
+`student_id` is the **Student record** id, not the child's user id. Enrolling someone already
+enrolled is 409.
+
+### `GET /admin/sessions` · `GET /admin/sessions/overview` — `analytics.view`
+
+```json
+{ "total_sessions": 6, "live_now": 0, "upcoming": 2, "completed": 3, "cancelled": 1,
+  "total_attendance_marks": 6, "live_sessions": [ … ], "upcoming_sessions": [ … ] }
+```
+
+### `GET /admin/sessions/attendance-report` — `analytics.view`
+
+```json
+{ "sessions_held": 3,
+  "courses": [{ "course_id": "6ada…", "course_title": "Scratch Programming",
+                "sessions_held": 3, "expected_marks": 12, "present_marks": 6, "rate": 50 }],
+  "students": [{ "student_id": "6ada…", "student_name": "Liam Hassan",
+                 "sessions_attended": 2, "sessions_recorded": 2, "rate": 100,
+                 "by_method": { "qr": 1, "roster": 1 } }] }
+```
+
+Only classes that have actually been held count toward `sessions_held`: a class still to come would
+drag every rate down for no reason.
 
 ---
 
@@ -430,10 +760,6 @@ rather than logging 404s (ADR-018). All are authenticated reads; none writes.
 
 | Endpoint | Returns | Arrives |
 |---|---|---|
-| `GET /courses` | `[]` | Batch 2 |
-| `GET /admin/courses` | `{ courses: [], total_revenue: 0 }` | Batch 2 |
-| `GET /assignments`, `GET /assignments/instructor` | `[]` | Batch 2 |
-| `GET /certificates` | `[]` | Batch 2 |
 | `GET /payments`, `GET /subscriptions` | `[]` | Batch 3 |
 | `GET /payments/stats` | zeroed totals with six named months | Batch 3 |
 | `GET /conversations`, `GET /messages` | `[]` | Batch 3 |

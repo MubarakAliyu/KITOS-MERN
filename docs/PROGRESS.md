@@ -4,10 +4,109 @@
 |---|---|---|---|---|
 | Docs | main | ✅ Done | 17 Oct 2026 | Project report (Ch. 1–5), PRD, CLAUDE.md, LAB-PHASES, ADR-001–008, batch prompts |
 | 1 — Backend foundation, identity and brand | batch/01-foundation | ✅ Done | 23 Oct 2026 | Express 5 + MongoDB API, 8 models, 33 endpoints, 325 server tests, Playwright + axe, CI, KIT logo and StarNova attribution |
-| 2 — Learning core and hybrid sessions | batch/02-learning-sessions | 🚧 In progress | | |
+| 2 — Learning core and hybrid sessions | batch/02-learning-sessions | ✅ Done | 3 Nov 2026 | Courses, modules, lessons, quizzes, assignments, progress, certificates with public verification, live and hybrid sessions with QR attendance and recordings; 21 models, 93 routes, 418 server tests, 46 end-to-end |
 | 3 — Real-time, payments, admin and deployment | batch/03-realtime-payments-deploy | ⏳ Not started | | |
 
 ## Log
+
+### Batch 2 — Learning core and hybrid sessions (3 Nov 2026)
+
+**What was built**
+
+The learning platform itself, and the hybrid classes that are the point of a programme running in two
+cities. A child signs in, reads a lesson, sits a quiz, submits an assignment, watches their progress
+rise and earns a certificate anyone can verify. An instructor writes that content, schedules a class,
+takes the register by hand or by QR code, and posts the recording. A parent watches all of it. Nothing
+on any of those screens is mock data any more.
+
+- **Models** (13 new, 21 in all) — `Course`, `Module`, `Lesson`, `LessonCompletion`, `Quiz`,
+  `QuizAttempt`, `Assignment`, `Submission`, `Enrollment`, `Certificate`, `Session`, `Attendance`,
+  `Recording`.
+- **Endpoints** — 54 new, 93 in all. Content authoring, the work a child does, certificates with a
+  public verification route, sessions, attendance, QR tokens, recordings, and the admin overview and
+  attendance report. Every one is in `docs/API.md`.
+- **Progress** — one rule in one service: lessons, passed quizzes and submitted assignments count
+  equally, and an empty course is 0%, never 100%. Adding content to a finished course puts a child
+  back mid-course without revoking the certificate they already hold.
+- **Certificates** — issued in a transaction, once per child and course, idempotent under a double
+  click or two requests racing to finish the last lesson. Serial `KIT-CERT-YYYY-NNNN` from an atomic
+  counter, a ten-character verification code, a landscape PDF carrying both marks, and a public
+  `/verify/<code>` page that shows initials only (FR11).
+- **Sessions** — status computed from the clock, never stored (ADR-023), so nothing has to run on a
+  timer for a class to start. A 15-minute-early to 24-hour-late attendance window, 60-second QR
+  tokens, and three ways to be marked present: the instructor's register, a child scanning the code,
+  and the automatic mark when a child opens the meeting link.
+- **QR check-in, both ends** — the instructor's display refreshes every 60 seconds with a countdown
+  and shows the raw code to read out; the child's scanner uses `BarcodeDetector` where the browser has
+  it and offers a typed code where it does not, which is also the path a child on an older Android
+  phone takes.
+- **Tests** — 418 server tests (93 new) and 46 end-to-end across desktop and Pixel 7,
+  including two full journeys: an instructor's new module reaching a child, a parent and a verified
+  certificate; and a class scheduled for two minutes' time going live, taking the register both ways,
+  and leaving a recording.
+
+**Six real defects found by running it, not by reading it**
+
+The suites and the lint all passed while these were live, which is why Part G is written as journeys
+through the UI rather than as unit tests.
+
+1. **Certificates were being lost, not delayed.** Only lesson completion issued one. A child whose
+   last outstanding piece of work was a quiz or an assignment reached 100%, was told the course was
+   complete, and never received their certificate — and because completion is a one-shot edge, no
+   later action could recover it (ADR-026).
+2. **The downloaded certificate could not be verified.** The browser-rendered PDF printed
+   `KIT-<record id>-VERIFY`, a placeholder from the mock era that reads like a code and verifies as
+   nothing. A family presenting it would have been turned away.
+3. **No class could be scheduled through the UI at all.** The session form's course dropdown held
+   three hard-coded titles that exist in no database, and it posted a course name where the API wanted
+   a `course_id`, so every attempt failed validation. It loads the instructor's own courses now.
+4. **The parent's children screen showed nothing.** `GET /students/:id/progress` ran its whole
+   ownership check and then returned a hard-coded empty array — a Batch 1 stub. The real feed had been
+   written in this batch and nothing called it. The children's course counters and the instructor's
+   course and pupil counts were hard-coded zeros for the same reason.
+5. **Any instructor could read any child's progress.** ADR-014 deferred the narrowing to this batch;
+   it needed doing. An enrolment on one of their own courses is now required.
+6. **Deleting a course orphaned its classes.** Sessions, registers and recordings outlived it, so an
+   orphan class would have shown on the admin screens as a blank row and still counted in the
+   attendance report.
+
+**ADRs added** — ADR-023 to ADR-029, all **Accepted**: computed session status; lesson HTML sanitised
+on write; instructors author while only an administrator publishes; whatever finishes a course issues
+the certificate; a deleted course keeps its certificates; the seeded live class lasting an hour; and
+one tenth colour pair joining the ADR-020 contrast exemption.
+
+**The contrast exemption grew by one pair (ADR-029).** The teal "In Progress" chip on a child's course
+card was always in the retained design and was unreachable while progress returned an empty array —
+every card read "Not Started" in grey. Real progress rendered it for the first time, and it fails AA
+at about 3:1 on a 12% tint of itself. Nothing was restyled. The parent dashboard also failed axe on
+its child names and ages, and that one was the scan sampling a half-faded card mid-fetch: the harness
+now waits for the loading placeholders to clear before scanning, and no colour was exempted for it.
+
+**Known limitation of the seed (ADR-028)**
+
+`npm run seed` places one class five minutes in the past, sixty minutes long. The live banner, the QR
+display and check-in are demonstrable for about an hour afterwards; after that the class reads
+`completed` and those paths have nothing to show. **Re-run the seed before demonstrating or
+screenshotting them.** No test depends on it — the journeys schedule their own class.
+
+**Deferred, with reasons**
+
+| Item | Why | When |
+|---|---|---|
+| Chat, payments, analytics | Batch 3 scope | Batch 3 |
+| Cloudinary uploads for assignment files | Needs the account; submissions take links and text | Batch 3 |
+| Socket.IO live updates | `NEXT_PUBLIC_SOCKET_URL` stays unset until the server exists | Batch 3 |
+| Lighthouse measurement | Needs the deployed URL | Batch 3 |
+| 83 React Compiler lint warnings | Rewriting them is the redesign the PRD forbids | Cosmetic; optional |
+
+**Limitations carried forward**
+
+- Palette contrast (ADR-020, accepted) — unchanged from Batch 1: an accepted brand exception, not an
+  outstanding defect, and the exemption cannot grow silently.
+- Batch 3 is not built; the screens that need it render empty states against endpoints that return
+  empty, correctly shaped data (ADR-018).
+- Saving the register by hand overwrites the method of an earlier self check-in. The status is
+  unchanged and the instructor in the room is the authority on who is there, so this is deliberate.
 
 ### Batch 1 — Backend foundation, identity and brand (23 Oct 2026)
 

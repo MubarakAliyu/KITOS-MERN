@@ -15,6 +15,10 @@ import { authenticate } from "../middleware/authenticate.js";
  * are no courses, payments or certificates in a Batch 1 database — and it is
  * exactly what these screens are designed to handle.
  *
+ * Batch 2 emptied most of this: courses, lessons, quizzes, assignments,
+ * certificates and sessions are all real now. What is left is Batch 3 —
+ * payments, chat and analytics.
+ *
  * Rules for this file (ADR-018):
  *   - **Reads only.** No endpoint here writes. A write that silently did
  *     nothing would be a lie the UI would believe.
@@ -32,21 +36,6 @@ export const placeholderRouter = Router();
  * typo'd URL answer "Authentication required" instead of 404.
  */
 const empty = (body) => [authenticate, (_req, res) => res.status(200).json(body)];
-
-// ── Batch 2: learning content ───────────────────────────────────────────────
-
-/** Student's course list, and the admin/instructor catalogues. */
-placeholderRouter.get("/courses", empty([]));
-
-/** Admin courses screen reads `{ courses, total_revenue }`. */
-placeholderRouter.get("/admin/courses", empty({ courses: [], total_revenue: 0 }));
-
-/** Student assignments, and the instructor's review queue. */
-placeholderRouter.get("/assignments", empty([]));
-placeholderRouter.get("/assignments/instructor", empty([]));
-
-/** Certificates are issued on completion (FR11). */
-placeholderRouter.get("/certificates", empty([]));
 
 // ── Batch 3: payments ───────────────────────────────────────────────────────
 

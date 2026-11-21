@@ -15,6 +15,7 @@ import {
   Check,
   Loader2,
   CalendarClock,
+  QrCode,
 } from "lucide-react";
 import {
   getInstructorSession,
@@ -24,6 +25,7 @@ import {
 import { useCountdown } from "@/_hooks/useCountdown";
 import { formatDuration, minutesSince, minutesRemaining } from "@/_lib/utils/sessions";
 import SessionStatusBadge from "@/_components/sessions/SessionStatusBadge";
+import QrCheckInModal from "@/_components/sessions/instructor/QrCheckInModal";
 
 export default function InstructorSessionDetailPage() {
   const { sessionId } = useParams();
@@ -154,6 +156,7 @@ function ScheduledBlock({ session }) {
 function AttendanceTaker({ session }) {
   const [roster, setRoster] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const live = session.status === "live";
 
   useEffect(() => {
@@ -187,18 +190,37 @@ function AttendanceTaker({ session }) {
         <h2 className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)] font-mono-ui">
           <UserCheck className="h-4 w-4" /> {live ? "Take Attendance" : "Attendance"}
         </h2>
-        {roster && (
-          <span className="text-xs font-bold text-[#10B981] font-mono-ui">
-            {presentCount}/{roster.length} present
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {roster && (
+            <span className="text-xs font-bold text-[#10B981] font-mono-ui">
+              {presentCount}/{roster.length} present
+            </span>
+          )}
+          {live && (
+            /* Pupils scan this instead of being called out one by one. */
+            <button
+              type="button"
+              onClick={() => setQrOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#10B981] px-3 py-1.5 text-xs font-semibold text-[#10B981] transition-colors hover:bg-[#10B981]/10"
+            >
+              <QrCode className="h-3.5 w-3.5" /> Show QR code
+            </button>
+          )}
+        </div>
       </div>
 
       {live && (
         <p className="text-xs text-[var(--text-secondary)]">
-          Check students in as they join the session.
+          Check students in as they join, or show the QR code and let them
+          check themselves in.
         </p>
       )}
+
+      <QrCheckInModal
+        isOpen={qrOpen}
+        onClose={() => setQrOpen(false)}
+        session={session}
+      />
 
       {!roster ? (
         <div className="skeleton-shimmer h-40 w-full rounded-xl" />

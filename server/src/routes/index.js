@@ -14,6 +14,7 @@ import {
 } from "../middleware/rateLimit.js";
 import * as s from "../validators/schemas.js";
 import { placeholderRouter } from "./placeholders.js";
+import { learningRouter } from "./learning.js";
 
 /**
  * Every Batch 1 route.
@@ -232,20 +233,6 @@ router.get(
   c.getInstructorMe
 );
 
-router.get(
-  "/instructors/me/courses",
-  authenticate,
-  requireRole("instructor", "admin"),
-  c.getInstructorCourses
-);
-
-router.get(
-  "/instructors/me/students",
-  authenticate,
-  requireRole("instructor", "admin"),
-  c.getInstructorStudents
-);
-
 // ── Platform settings ───────────────────────────────────────────────────────
 
 /** Readable by any signed-in user — the UI reads the platform name and logo. */
@@ -296,6 +283,9 @@ router.post(
   c.postSendNotification
 );
 
-// ── Batch 2 and 3 placeholders ──────────────────────────────────────────────
+// ── Batch 2: learning, assessment, certificates and sessions ────────────────
+router.use(learningRouter);
+
+// ── Batch 3 placeholders ────────────────────────────────────────────────────
 // Registered last so a real route above always wins. See routes/placeholders.js.
 router.use(placeholderRouter);
