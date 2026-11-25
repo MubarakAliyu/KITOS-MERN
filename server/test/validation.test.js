@@ -4,6 +4,7 @@ import rateLimit from "express-rate-limit";
 import express from "express";
 import { app, makeUser, auth, resetState, PASSWORD } from "./helpers.js";
 import { sanitizeValue } from "../src/middleware/sanitizeKeys.js";
+import { cloudinaryProvider } from "../src/lib/storage.js";
 import { User } from "../src/models/User.js";
 import { Setting } from "../src/models/Setting.js";
 import { parseEnv } from "../src/config/env.js";
@@ -221,6 +222,49 @@ describe("environment validation", () => {
 
   it("refuses a CLIENT_ORIGIN that is not a URL", () => {
     expect(() => parseEnv({ ...valid, CLIENT_ORIGIN: "not a url" })).toThrow();
+  });
+});
+
+/**
+ * Only the delivery URL is stored against a submission, so deleting an asset
+ * means recovering its public id from that URL. Getting this wrong deletes
+ * the wrong asset or nothing at all, and neither is visible until someone
+ * tries it in production.
+ */
+describe("the Cloudinary provider's public ids", () => {
+  const cases = [
+    [
+      "https://res.cloudinary.com/kit/image/upload/v1699123/submissions/abc-work.pdf",
+      "submissions/abc-work",
+    ],
+    // No version segment.
+    [
+      "https://res.cloudinary.com/kit/raw/upload/submissions/abc-work.sb3",
+      "submissions/abc-work",
+    ],
+    // Nested folders survive; only the extension is dropped.
+    [
+      "https://res.cloudinary.com/kit/image/upload/v1/a/b/c/file.name.png",
+      "a/b/c/file.name",
+    ],
+  ];
+
+  for (const [url, expected] of cases) {
+    it(`reads ${expected} out of its URL`, () => {
+      expect(cloudinaryProvider.publicIdFromUrl(url)).toBe(expected);
+    });
+  }
+
+  it("declines anything that is not a Cloudinary URL", () => {
+    for (const url of [
+      "/uploads/local-file.pdf",
+      "https://www.youtube.com/watch?v=abc",
+      "https://example.com/upload/v1/thing.png",
+      "",
+      null,
+    ]) {
+      expect(cloudinaryProvider.publicIdFromUrl(url)).toBeNull();
+    }
   });
 });
 

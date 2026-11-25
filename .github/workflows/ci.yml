@@ -100,6 +100,21 @@ jobs:
           fi
           echo "MSW is absent from the production build."
 
+      # AC3.4: no production module reaches for mock data. The two MSW entry
+      # points are the only permitted references, they are gated on
+      # NEXT_PUBLIC_API_MOCKING, and next.config.mjs aliases them to a stub
+      # when mocking is off — which the check above proves held.
+      - name: Check no component imports mock data
+        working-directory: client
+        run: |
+          offenders=$(grep -rln "_lib/mocks" src             --include='*.js' --include='*.jsx'             | grep -v '^src/_lib/mocks/'             | grep -v '^src/instrumentation.js$'             | grep -v '^src/_components/providers/MSWProvider.jsx$'             || true)
+          if [ -n "$offenders" ]; then
+            echo "These modules import mock data:"
+            echo "$offenders"
+            exit 1
+          fi
+          echo "No component imports mock data."
+
   e2e:
     name: End-to-end — journeys, smoke and axe
     runs-on: ubuntu-latest
