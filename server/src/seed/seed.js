@@ -20,6 +20,7 @@ import {
   admissionCounterKey,
   ensureSequenceAtLeast,
   formatAdmissionSequence,
+  nextReceiptNumber,
 } from "../lib/numbering.js";
 import {
   CONSENT_CURRENT_VERSION,
@@ -39,6 +40,8 @@ import {
   MODULES,
   ENROLMENTS,
   SESSIONS,
+  PAYMENTS,
+  SUBSCRIPTIONS,
 } from "./courses.js";
 import { Course } from "../models/Course.js";
 import { Module } from "../models/Module.js";
@@ -56,6 +59,8 @@ import { Recording } from "../models/Recording.js";
 import { Conversation } from "../models/Conversation.js";
 import { Message } from "../models/Message.js";
 import { Announcement } from "../models/Announcement.js";
+import { Payment } from "../models/Payment.js";
+import { Subscription } from "../models/Subscription.js";
 import { nairaToKobo } from "../lib/serialize.js";
 import { recalculateProgress } from "../services/progress.service.js";
 import { issueCertificate } from "../services/enrollment.service.js";
@@ -160,7 +165,25 @@ async function clearCollections() {
     Conversation.deleteMany({}),
     Message.deleteMany({}),
     Announcement.deleteMany({}),
+    Payment.deleteMany({}),
+    Subscription.deleteMany({}),
   ]);
+}
+
+/**
+ * Writes a document's `created_at` to a past date.
+ *
+ * Through the raw driver on purpose. `created_at` comes from the schema's
+ * timestamps option, which marks it immutable, so a Mongoose `$set` on it is
+ * silently discarded — no error, no change. Seeded history that all lands in
+ * the current month makes the revenue chart and the chat transcript look
+ * wrong in a way that is easy to miss and hard to explain.
+ */
+async function backdate(Model, id, when) {
+  await Model.collection.updateOne(
+    { _id: id },
+    { $set: { created_at: when } }
+  );
 }
 
 export async function runSeed({ quiet = false } = {}) {
@@ -513,6 +536,101 @@ export async function runSeed({ quiet = false } = {}) {
     }
   }
 
+  // ── Payments and subscriptions ───────────────────────────────────────────
+  say("Recording payments…");
+
+  let receiptsIssued = 0;
+
+  /** The first of a month, `monthsAgo` back from today. */
+  function monthsBack(monthsAgo) {
+    const now = new Date();
+    const date = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 1);
+    // Mid-month and mid-morning, so a payment never lands on a boundary
+    // where the Lagos and UTC months disagree.
+    date.setDate(14);
+    date.setHours(10, 30, 0, 0);
+    return date;
+  }
+
+  for (const entry of PAYMENTS) {
+    const courseId = courseIds.get(entry.course);
+    const course = COURSES.find((c) => c.key === entry.course);
+    const studentProfileId = studentIdByKey.get(entry.student);
+    const studentFixture = STUDENTS.find((st) => st.key === entry.student);
+    const parentUserId = parentIds.get(entry.parent);
+    const createdAt = monthsBack(entry.monthsAgo);
+
+    if (!courseId || !studentProfileId || !parentUserId) {
+      // A fixture naming a key that does not exist is a typo in the seed
+      // data, and skipping it quietly is how a demo ends up missing the
+      // pending and failed rows nobody notices are absent.
+      throw new Error(
+        `PAYMENTS fixture references something that does not exist: ` +
+          `parent "${entry.parent}", student "${entry.student}", course "${entry.course}"`
+      );
+    }
+
+    const paid = entry.status === "paid";
+    const payment = await Payment.create({
+      paystack_ref: `KIT-SEED-${String(receiptsIssued + 1).padStart(4, "0")}`,
+      parent_id: parentUserId,
+      student_id: studentProfileId,
+      course_id: courseId,
+      parent_name: PARENTS.find((pa) => pa.key === entry.parent)?.name ?? "",
+      student_name: studentFixture?.name ?? "",
+      student_admission_no:
+        createdStudents.find((st) => st.key === entry.student)?.admissionNo ?? null,
+      course_title: course?.title ?? "",
+      // From the course, exactly as a real payment's is.
+      amount_kobo: nairaToKobo(course?.price ?? 0),
+      type: entry.type,
+      status: entry.status,
+      // Receipt numbers only exist for money that arrived.
+      receipt_no: paid ? await nextReceiptNumber({ now: createdAt }) : null,
+      paid_at: paid ? createdAt : null,
+      confirmed_via: paid ? "simulated" : null,
+      gateway_response: paid
+        ? "Simulated approval (seeded demonstration data)"
+        : entry.status === "failed"
+          ? "Declined by issuer (seeded demonstration data)"
+          : null,
+    });
+    if (paid) receiptsIssued += 1;
+
+    // The revenue chart buckets on `created_at`, and the schema's timestamps
+    // option marks it immutable — a Mongoose `$set` on it is silently
+    // dropped, which is how every seeded payment first ended up in the
+    // current month. The raw driver writes it for real.
+    await backdate(Payment, payment._id, createdAt);
+  }
+
+  for (const entry of SUBSCRIPTIONS) {
+    const courseId = courseIds.get(entry.course);
+    const course = COURSES.find((c) => c.key === entry.course);
+    const studentProfileId = studentIdByKey.get(entry.student);
+    const parentUserId = parentIds.get(entry.parent);
+    if (!courseId || !studentProfileId || !parentUserId) {
+      throw new Error(
+        `SUBSCRIPTIONS fixture references something that does not exist: ` +
+          `parent "${entry.parent}", student "${entry.student}", course "${entry.course}"`
+      );
+    }
+
+    const start = monthsBack(entry.monthsAgo);
+    await Subscription.create({
+      parent_id: parentUserId,
+      student_id: studentProfileId,
+      course_id: courseId,
+      student_name: STUDENTS.find((st) => st.key === entry.student)?.name ?? "",
+      course_title: course?.title ?? "",
+      amount_kobo: nairaToKobo(course?.price ?? 0),
+      interval: "monthly",
+      status: "active",
+      start_date: start,
+      next_billing: monthsBack(-1),
+    });
+  }
+
   // ── Chat ─────────────────────────────────────────────────────────────────
   // Two threads, both of them allowed pairs (PRD §10): a pupil with the
   // instructor who teaches them, and a parent with an administrator. The
@@ -552,11 +670,7 @@ export async function runSeed({ quiet = false } = {}) {
         message: entry.text,
         read: entry.read ?? true,
       });
-      await Message.updateOne(
-        { _id: message._id },
-        { $set: { created_at: createdAt } },
-        { timestamps: false }
-      );
+      await backdate(Message, message._id, createdAt);
       messagesSeeded += 1;
 
       if (!(entry.read ?? true)) {
@@ -655,6 +769,9 @@ export async function runSeed({ quiet = false } = {}) {
     enrolments: ENROLMENTS.length,
     sessions: SESSIONS.length,
     certificates: certificatesIssued,
+    payments: PAYMENTS.length,
+    receipts: receiptsIssued,
+    subscriptions: SUBSCRIPTIONS.length,
     conversations: await Conversation.countDocuments({}),
     messages: messagesSeeded,
     firstAdmission: createdStudents[0]?.admissionNo,
@@ -711,6 +828,7 @@ async function main() {
     console.log(`  Enrolments:  ${summary.enrolments}`);
     console.log(`  Sessions:    ${summary.sessions}`);
     console.log(`  Certificates: ${summary.certificates}`);
+    console.log(`  Payments:    ${summary.payments} (${summary.receipts} receipts, ${summary.subscriptions} subscriptions)`);
     console.log(`  Conversations: ${summary.conversations} (${summary.messages} messages)`);
     console.log(`  Passwords:   ${summary.passwordSource}`);
 

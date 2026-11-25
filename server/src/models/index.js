@@ -32,3 +32,5 @@ export { Recording } from "./Recording.js";
 export { Conversation } from "./Conversation.js";
 export { Message } from "./Message.js";
 export { Announcement } from "./Announcement.js";
+export { Payment } from "./Payment.js";
+export { Subscription } from "./Subscription.js";

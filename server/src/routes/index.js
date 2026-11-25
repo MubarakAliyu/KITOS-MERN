@@ -344,6 +344,78 @@ router.get(
   c.getAllConversations
 );
 
+// ── Batch 3: payments (PRD §11.1) ───────────────────────────────────────────
+
+/**
+ * Public, and authenticated by signature rather than by token: Paystack
+ * calls it, not a browser. The raw body parser is mounted for this path in
+ * app.js, because the HMAC is over the exact bytes sent.
+ */
+router.post("/paystack/webhook", c.postPaystackWebhook);
+
+router.post(
+  "/paystack/initiate",
+  authenticate,
+  requirePermission("payment.make"),
+  validate({ body: s.initiatePaymentBody }),
+  c.postInitiatePayment
+);
+
+router.post(
+  "/paystack/verify",
+  authenticate,
+  requirePermission("payment.make"),
+  validate({ body: s.verifyPaymentBody }),
+  c.postVerifyPayment
+);
+
+/** Literal paths before `/payments/:id/receipt`, so neither shadows the other. */
+router.get(
+  "/payments/stats",
+  authenticate,
+  requirePermission("payment.view"),
+  c.getPaymentStats
+);
+
+router.get(
+  "/payments/:id/receipt",
+  authenticate,
+  requirePermission("payment.view"),
+  validate({ params: idParamSchema, query: s.receiptQuery }),
+  c.getReceipt
+);
+
+router.get(
+  "/payments",
+  authenticate,
+  requirePermission("payment.view"),
+  validate({ query: s.listPaymentsQuery }),
+  c.getPayments
+);
+
+router.get(
+  "/subscriptions",
+  authenticate,
+  requirePermission("payment.view"),
+  c.getSubscriptions
+);
+
+router.post(
+  "/subscriptions/cancel",
+  authenticate,
+  requirePermission("payment.make"),
+  validate({ body: s.cancelSubscriptionBody }),
+  c.postCancelSubscription
+);
+
+router.get(
+  "/admin/payments",
+  authenticate,
+  requirePermission("analytics.view"),
+  validate({ query: s.listPaymentsQuery }),
+  c.getAdminPayments
+);
+
 // ── Batch 2: learning, assessment, certificates and sessions ────────────────
 router.use(learningRouter);
 

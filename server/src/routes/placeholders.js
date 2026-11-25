@@ -37,34 +37,6 @@ export const placeholderRouter = Router();
  */
 const empty = (body) => [authenticate, (_req, res) => res.status(200).json(body)];
 
-// ── Batch 3: payments ───────────────────────────────────────────────────────
-
-placeholderRouter.get("/payments", empty([]));
-placeholderRouter.get("/subscriptions", empty([]));
-
-/**
- * The parent payments screen charts six months, so the array must be present
- * and in order even when every figure is zero — an empty array renders a
- * broken chart rather than an empty one.
- */
-placeholderRouter.get(
-  "/payments/stats",
-  empty({
-    total_revenue: 0,
-    subscription_revenue: 0,
-    one_time_revenue: 0,
-    pending_count: 0,
-    failed_count: 0,
-    this_month: 0,
-    last_month: 0,
-    monthly_data: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"].map((month) => ({
-      month,
-      subscription: 0,
-      one_time: 0,
-    })),
-  })
-);
-
 // ── Batch 3: analytics ──────────────────────────────────────────────────────
 
 /**
@@ -81,6 +53,3 @@ placeholderRouter.get(
     payment_split: [],
   })
 );
-
-/** Admin payments table, same envelope as the courses screen. */
-placeholderRouter.get("/admin/payments", empty({ payments: [], total_revenue: 0 }));

@@ -76,6 +76,19 @@ export function createApp() {
     })
   );
 
+  /**
+   * The Paystack webhook needs the raw bytes it was sent.
+   *
+   * Its signature is an HMAC over the exact body, so this must be mounted
+   * **before** the JSON parser: once `express.json` has consumed the stream,
+   * the original bytes are gone, and re-serialising the parsed object changes
+   * key order and whitespace so the signature could never match.
+   */
+  app.use(
+    "/paystack/webhook",
+    express.raw({ type: "*/*", limit: "1mb" })
+  );
+
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 

@@ -57,6 +57,30 @@ describe("validation errors", () => {
 });
 
 describe("Mongo operator sanitising", () => {
+  /**
+   * A Buffer is an object, and the first version of this check treated it as
+   * a plain one: `Object.entries` walked its bytes and handed back
+   * `{0: 12, 1: 34, …}`. That silently destroyed the raw request body the
+   * Paystack webhook signs over, so a correctly signed webhook was rejected.
+   */
+  it("leaves a Buffer alone instead of unpacking it into a byte map", () => {
+    const raw = Buffer.from('{"event":"charge.success"}', "utf8");
+
+    const { value, removed } = sanitizeValue(raw);
+
+    expect(Buffer.isBuffer(value)).toBe(true);
+    expect(value.toString("utf8")).toBe('{"event":"charge.success"}');
+    expect(removed).toEqual([]);
+  });
+
+  it("leaves other non-plain objects intact", () => {
+    const date = new Date("2026-01-01T00:00:00.000Z");
+    const { value } = sanitizeValue({ when: date, bytes: Buffer.from("hi") });
+
+    expect(value.when).toBe(date);
+    expect(Buffer.isBuffer(value.bytes)).toBe(true);
+  });
+
   it("strips $-prefixed and dotted keys at any depth", () => {
     const { value, removed } = sanitizeValue({
       email: "ok@kit.test",

@@ -339,3 +339,6 @@ export const postSendNotification = handle(async (req, res) => {
 
 /** Batch 3 — chat, notifications and announcements. */
 export * from "./chat.js";
+
+/** Batch 3 — payments, receipts and subscriptions. */
+export * from "./payments.js";

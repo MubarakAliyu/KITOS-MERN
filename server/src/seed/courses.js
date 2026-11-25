@@ -259,6 +259,44 @@ export const ENROLMENTS = [
 ];
 
 /**
+ * Payments, spread over the last few months so the revenue chart has a shape
+ * rather than a single bar.
+ *
+ * `monthsAgo` is counted back from the seed run, for the same reason the
+ * sessions are placed relative to "now" (ADR-028): a fixed date would drift
+ * out of the six-month window the chart draws and the screen would look
+ * broken a term later.
+ *
+ * Amounts are not written here — they come from the course, exactly as a
+ * real payment's does, so the seed cannot disagree with the price list.
+ */
+export const PAYMENTS = [
+  { parent: "fatima", student: "liam", course: "scratch", type: "subscription", monthsAgo: 4, status: "paid" },
+  { parent: "fatima", student: "liam", course: "web", type: "one_time", monthsAgo: 3, status: "paid" },
+  { parent: "fatima", student: "aisha", course: "scratch", type: "subscription", monthsAgo: 3, status: "paid" },
+  { parent: "ibrahim", student: "emeka", course: "scratch", type: "subscription", monthsAgo: 2, status: "paid" },
+  { parent: "fatima", student: "liam", course: "scratch", type: "subscription", monthsAgo: 2, status: "paid" },
+  { parent: "zainab", student: "yusuf", course: "web", type: "one_time", monthsAgo: 1, status: "paid" },
+  { parent: "fatima", student: "aisha", course: "scratch", type: "subscription", monthsAgo: 1, status: "paid" },
+  { parent: "fatima", student: "liam", course: "scratch", type: "subscription", monthsAgo: 0, status: "paid" },
+  // One of each unhappy state, so the admin table and the stat cards have
+  // something other than success to show.
+  { parent: "zainab", student: "maryam", course: "scratch", type: "subscription", monthsAgo: 0, status: "pending" },
+  { parent: "ibrahim", student: "daniel", course: "robotics", type: "subscription", monthsAgo: 0, status: "failed" },
+];
+
+/**
+ * Active plans. One per child per course, which is what the unique index
+ * allows — paying a second month updates the plan rather than opening a
+ * second one.
+ */
+export const SUBSCRIPTIONS = [
+  { parent: "fatima", student: "liam", course: "scratch", monthsAgo: 4 },
+  { parent: "fatima", student: "aisha", course: "scratch", monthsAgo: 3 },
+  { parent: "ibrahim", student: "emeka", course: "scratch", monthsAgo: 2 },
+];
+
+/**
  * Sessions, placed relative to "now" so the demo never goes stale: one is
  * genuinely live whenever the seed is run, one is upcoming, two have
  * finished and one is cancelled.
