@@ -114,7 +114,7 @@ export default function ReceiptModal({ payment, isOpen, onClose }) {
               </div>
 
               <p className="text-[11px] text-[var(--text-muted)] font-mono-ui">
-                {t("payments.reference")}: {payment.paystack_ref}
+                {t("payments.reference")}: {payment.tx_ref}
               </p>
             </div>
 

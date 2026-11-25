@@ -379,3 +379,71 @@ A transactional provider will only send as an address it has verified, and verif
 needs DNS records on a domain the project may not control in time (ADR-032). Parents do reply to
 "your child's account is ready" and "here is your receipt", so the reply has to reach the school even
 when the envelope sender cannot be theirs. Splitting the two is how that works without waiting on DNS.
+
+## ADR-036 — Flutterwave replaces Paystack
+**Status:** Accepted (decided by the product owner, 25 Nov 2026). Payments go through **Flutterwave
+v3 test mode**. Paystack's compliance review for the Kids In Tech account stalled with no date
+attached; the school's Flutterwave account is already fully verified. A checkpoint that cannot
+demonstrate a payment is a checkpoint that fails on someone else's queue, so the provider moved.
+
+**Supersedes the Paystack parts of ADR-021 and ADR-033,** and the Paystack wording in PRD §11.1 and
+§15.2. Those ADRs are left as written, per the rule at the top of this file: what they decided about
+status vocabulary and course fees still holds, and only the provider behind them changed.
+
+### What did not change
+Every rule Part B established is intact, which is the point of having had a gateway wrapper at all:
+the amount comes from the course and never from the request; the provider's reported amount must
+match it; one atomic `pending` → `paid` claim is the only way a payment becomes paid; and
+confirmation is idempotent across verify and webhook arriving together (AC3.3). `lib/flutterwave.js`
+is the only file that knows which provider is in use, and `payment.service.js` did not learn.
+Receipts keep their `RCP-YYYYMM-NNNN` numbers.
+
+### What changed, and the two things that would have been silent bugs
+1. **Flutterwave quotes money in naira; KITOS stores kobo.** v3 takes `amount: 15000` to mean
+   ₦15,000, where Paystack's minor units meant ₦150. A port that passed `amount_kobo` through
+   unchanged would have asked a parent's card for one hundred times the course fee — and ₦1,500,000
+   is a plausible-looking number, not an obvious crash. The conversion lives at the wrapper's edge
+   and nowhere else, and `test/flutterwave.test.js` asserts it in both directions.
+2. **`amount` is the figure to compare, never `charged_amount`.** The latter includes Flutterwave's
+   fee, so a correct ₦20,000 payment reports a charged amount near ₦20,280. Comparing against it
+   would have rejected every genuine payment — a failure that at least fails safe, but fails
+   completely. The test fixtures deliberately set the two apart.
+
+Also: `status` is `successful`, not `success`, so the wrapper translates rather than spreading a
+second vocabulary through the services; the DB field `paystack_ref` became `tx_ref`; the routes
+`/paystack/*` became `/payments/initiate`, `/payments/verify` and `/payments/webhook`; and the
+client component `PaystackModal.jsx` became `CheckoutModal.jsx` — provider-neutral, because the
+cost of this change was mostly the provider's name being baked into forty files.
+
+### The webhook is authenticated differently, and more weakly
+Paystack signed each webhook with an HMAC-SHA512 over the raw body. **Flutterwave sends a static
+secret in a `verif-hash` header** — the same string on every call, chosen in the dashboard. That is
+a materially weaker guarantee: it establishes that the sender knows the secret, and says nothing
+about whether the body arrived intact, or is a replay, or was composed by whoever learned the hash
+from a log.
+
+So the webhook **re-verifies every transaction against the API before marking anything paid**, and
+the body is used for exactly one thing: learning which reference to go and ask about. Trusting
+`data.amount` would hand anyone who ever sees the hash a way to mark a ₦25,000 enrolment paid for
+nothing. Two tests state this directly: a correctly hashed body claiming success that the API
+contradicts, and one claiming the full fee for a ₦100 transaction.
+
+Consequences worth naming: the raw-body parser is gone from `app.js`, because there is no longer a
+signature over the bytes to preserve; and an unknown reference is dropped before any API call, so
+the endpoint cannot be used to make the server call out repeatedly.
+
+### Local and CI work with no account
+Unchanged, and still required by NFR6. With `FLW_SECRET_KEY` unset the wrapper simulates: initiate
+returns an inert link, verify answers success **for the amount on the row** — so the amount check
+still has something real to compare and cannot be masked by running offline — and the webhook route
+refuses to act and says why. A deployment that forgets `FLW_WEBHOOK_HASH` therefore gets a webhook
+that trusts nobody, rather than one that trusts everybody.
+
+### The client keeps its four steps
+The retained modal is unchanged in layout, type and motion; the provider panel reads "Flutterwave"
+in its brand orange instead of "Paystack" in blue. The inline overlay
+(`checkout.flutterwave.com/v3.js`, loaded through `next/script`) was chosen over the hosted redirect
+because a redirect tears the four-step modal down mid-flow and returns the parent to a fresh page
+with no memory of the child and course they had chosen. The hosted link is kept as the fallback for
+a deployment with no `NEXT_PUBLIC_FLW_PUBLIC_KEY`, and `/parent/payments` verifies on return from it.
+

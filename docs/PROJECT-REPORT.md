@@ -63,13 +63,13 @@ The specific objectives are to:
 
 ## 1.7 Scope of the Study
 
-The study covers the analysis, design, implementation, testing and cloud deployment of KITOS 2.0. The existing frontend design is retained; the work focuses on the backend, data, integration and deployment. In scope are: authentication and role management for administrators, instructors, parents and students; parent–child linking with consent; courses, modules, lessons, quizzes and assignments; learning tracks and cohorts; physical and online sessions with attendance and recordings; progress tracking and verifiable certificates; Paystack payments in test mode; real-time chat with child-safety restrictions; notifications and announcements; analytics and audit logs; English and Hausa interface languages; and deployment with CI.
+The study covers the analysis, design, implementation, testing and cloud deployment of KITOS 2.0. The existing frontend design is retained; the work focuses on the backend, data, integration and deployment. In scope are: authentication and role management for administrators, instructors, parents and students; parent–child linking with consent; courses, modules, lessons, quizzes and assignments; learning tracks and cohorts; physical and online sessions with attendance and recordings; progress tracking and verifiable certificates; Flutterwave payments in test mode; real-time chat with child-safety restrictions; notifications and announcements; analytics and audit logs; English and Hausa interface languages; and deployment with CI.
 
 Out of scope are: a full visual redesign of the interface, a native mobile application, an AI tutor, live video streaming built into the platform (sessions link to Google Meet or Zoom), partner-school teacher portals, and production payment settlement. These are recorded as future work.
 
 ## 1.8 Limitations of the Study
 
-The system is deployed on free cloud tiers, so the API host sleeps when idle and takes 30 to 50 seconds to wake. Evaluation is limited to the development team, KIT instructors and a small group of pilot users rather than a large controlled trial. Hausa translations cover the interface chrome and need review by a native speaker before wide release. Payment integration runs in Paystack's test mode.
+The system is deployed on free cloud tiers, so the API host sleeps when idle and takes 30 to 50 seconds to wake. Evaluation is limited to the development team, KIT instructors and a small group of pilot users rather than a large controlled trial. Hausa translations cover the interface chrome and need review by a native speaker before wide release. Payment integration runs in Flutterwave's test mode.
 
 ## 1.9 Definition of Terms
 
@@ -249,7 +249,7 @@ The legacy backend was studied in full because it records the business rules the
 | FR8 | Attendance is recorded for every session: by instructor roster, QR code check-in for physical classes, or automatic join tracking for online classes. |
 | FR9 | Recordings of online sessions are attached to sessions and available to enrolled students. |
 | FR10 | Certificates are issued automatically on course completion as branded PDFs with a public verification page and code. |
-| FR11 | Parents pay fees through Paystack; payments are verified server-side by webhook, receipts are generated, and enrolment activates on success. |
+| FR11 | Parents pay fees through Flutterwave; payments are verified server-side against the gateway's API, receipts are generated, and enrolment activates on success. |
 | FR12 | Real-time chat between student and instructor, parent and instructor, and parent and admin; no student-to-student private messaging; parents can view their child's conversations; admins can monitor. |
 | FR13 | In-app notifications and email for key events; admins broadcast announcements to roles, cohorts or courses. |
 | FR14 | Admin dashboard with KPIs and analytics (enrolments, attendance, completion, revenue); CSV export. |
@@ -290,7 +290,7 @@ KITOS 2.0 uses a three-tier, layered client–server architecture deployed acros
 
 **Data tier.** MongoDB Atlas hosts the database on a three-node replica set, enabling multi-document transactions. Cloudinary stores uploaded files (submissions, lesson resources, chat attachments, certificates). Email is sent through SMTP (Brevo or Gmail).
 
-**External services.** Paystack processes payments; YouTube (unlisted, privacy-enhanced embeds) hosts lesson videos and recordings; Google Meet or Zoom host live online sessions.
+**External services.** Flutterwave processes payments; YouTube (unlisted, privacy-enhanced embeds) hosts lesson videos and recordings; Google Meet or Zoom host live online sessions.
 
 ### 3.6.1 Technology Choices and Justification
 
@@ -304,7 +304,7 @@ KITOS 2.0 uses a three-tier, layered client–server architecture deployed acros
 | Auth | NextAuth (Credentials) on the client; JWT issued by the API; bcrypt | Keeps the existing sign-in flow; the API token travels inside NextAuth's encrypted, HTTP-only session cookie and is attached as a Bearer header. |
 | Real-time | Socket.IO | The frontend's chat hook already emits `join`, `message` and `typing`; the server implements those events. |
 | Files | Cloudinary | Render's disk is ephemeral; Cloudinary provides durable storage and a CDN. |
-| Payments | Paystack | Leading Nigerian gateway; the frontend's four-step payment flow already targets it. |
+| Payments | Flutterwave v3 | Verified KIT merchant account, reached through a single gateway wrapper. The frontend's four-step payment flow was written for Paystack and kept; only the provider step behind it changed (ADR-036). |
 | Testing | Vitest, Supertest, mongodb-memory-server, Playwright, axe | Fast API tests without external services; real-browser end-to-end and accessibility checks of the existing screens. |
 | Hosting | Vercel (client), Render (API), Atlas (data) | Free tiers, Git-based deploys, instant rollbacks, managed TLS. |
 | CI | GitHub Actions | Runs lint, tests and builds on every push and pull request. |
@@ -334,7 +334,7 @@ The data model was derived by reconciling the entities in the three existing cod
 | enrollments / lesson_completions | Student–course membership with `status` and `progress`; per-lesson completion. |
 | sessions / attendance / recordings | `scheduled_at`, `duration_minutes`, `mode` (physical, online, hybrid), `venue`, `meeting_url`, `status`; attendance per student with `method` (roster, qr, auto); recordings with `video_url`. |
 | certificates | `serial`, `student_id`, `course_id`, `issued_at`, `verification_code`, `pdf_url`. |
-| payments / subscriptions | `parent_id`, `student_id`, `course_id`, `amount` (kobo), `type`, `status`, `paystack_ref`, `receipt_no`. |
+| payments / subscriptions | `parent_id`, `student_id`, `course_id`, `amount` (kobo), `type`, `status`, `tx_ref`, `receipt_no`. |
 | conversations / messages | Participants with roles and `type`; messages with `sender_id`, `receiver_id`, `message`, `file_url`, `is_read`. |
 | notifications / announcements | Per-user notifications (`type`, `title`, `message`, `link`, `is_read`); broadcasts targeted by role or course. |
 | activity_logs / settings / counters | Append-only audit trail; platform settings; atomic counters for admission and receipt numbers. |
@@ -358,8 +358,8 @@ The API serves the paths the frontend already calls, relative to `NEXT_PUBLIC_AP
 | PUT /assignments/:id/feedback | Grade and give feedback | instructor (assigned) |
 | GET, POST, PATCH /sessions | List, schedule, reschedule or cancel sessions | session.manage to write |
 | POST /sessions/:id/attendance | Record attendance (roster or QR token) | instructor, or student with QR |
-| POST /paystack/initiate, /paystack/verify | Start and verify a payment | parent |
-| POST /paystack/webhook | Verify Paystack signature; confirm payment | Paystack (HMAC) |
+| POST /payments/initiate, /payments/verify | Start and verify a payment | parent |
+| POST /payments/webhook | Check the `verif-hash` header, re-verify the transaction against the gateway API, then confirm | Flutterwave (static header secret) |
 | GET /certificates/verify/:code | Public certificate verification | Public |
 | GET /admin/analytics, /admin/activity-log | KPIs, charts and audit trail | admin |
 
@@ -476,7 +476,7 @@ Batch 2 implements courses, modules, lessons, quizzes and assignments with the r
 
 ### 4.4.3 Batch 3: Real-Time, Payments, Admin and Deployment
 
-Batch 3 adds the Socket.IO server for the existing chat screens (with the child-safety rules), Paystack payments with server-side verification, webhook and receipts, subscriptions, notifications and announcements, admin analytics, payments and activity log, and platform settings. It completes the test suites, removes MSW from production, configures Vercel and Render, deploys, runs the production test checklist, and produces the API reference, deployment guide, demo script and presentation material.
+Batch 3 adds the Socket.IO server for the existing chat screens (with the child-safety rules), Flutterwave payments with server-side verification, webhook and receipts, subscriptions, notifications and announcements, admin analytics, payments and activity log, and platform settings. It completes the test suites, removes MSW from production, configures Vercel and Render, deploys, runs the production test checklist, and produces the API reference, deployment guide, demo script and presentation material.
 
 ## 4.5 Key Implementation Details
 
@@ -528,7 +528,9 @@ The frontend's NextAuth `authorize()` callback already posts the identifier and 
 
 ### 4.5.4 Payment confirmation
 
-A payment is never trusted from the browser. The parent's payment modal calls `/paystack/initiate`, which creates a pending payment and a Paystack transaction. The enrolment is activated only when the server verifies the transaction, through `/paystack/verify` after the popup closes or through Paystack's webhook (HMAC-SHA512 signature checked against the secret key). Either path runs one idempotent MongoDB transaction that marks the payment successful, issues an `RCP-` receipt number and activates the enrolment, so a repeated call has no further effect.
+A payment is never trusted from the browser. The parent's payment modal calls `/payments/initiate`, which creates a pending payment and opens a Flutterwave transaction; the amount is read from the course, never from the request, so a browser that sets its own price changes nothing. The enrolment is activated only when the server verifies the transaction, through `/payments/verify` after the checkout closes or through the webhook at `/payments/webhook`. Either path claims the payment with a single atomic update whose filter requires the status still to be `pending`, and the winner alone runs one idempotent MongoDB transaction that issues an `RCP-` receipt number and activates the enrolment — so verify and the webhook arriving together produce one paid payment, one receipt and one enrolment.
+
+Flutterwave authenticates its webhooks with a static secret in a `verif-hash` header rather than a signature over the request body, which establishes only that the sender knows the secret. The webhook therefore treats the body as nothing more than a prompt: it re-verifies the transaction against the gateway's API and acts solely on that answer, refusing any transaction whose amount, currency or reference does not match the fee on the row. Trusting the body would hand anyone who ever read the hash from a log a way to mark an enrolment paid for nothing.
 
 ### 4.5.5 Real-time chat with safety rules
 
@@ -562,7 +564,7 @@ Deployment follows the same proven procedure used in the author's previous MERN 
 1. **MongoDB Atlas.** Create a free M0 cluster (AWS, Frankfurt `eu-central-1`); create a database user with an autogenerated password; allow network access from anywhere (Render's free tier has no fixed outbound IP); copy the connection string as `MONGODB_URI`.
 2. **Cloudinary.** Create a free account and copy `CLOUDINARY_URL`.
 3. **SMTP.** Create a Brevo SMTP key, or a Gmail app password for the KIT address, and verify the sender.
-4. **Paystack.** Use test-mode secret and public keys; register the webhook URL `https://<api-domain>/paystack/webhook`.
+4. **Flutterwave.** Use test-mode secret and public keys; set a webhook secret hash and register the webhook URL `https://<api-domain>/payments/webhook`.
 5. **Render (API).** Create a Blueprint from the GitHub repository; Render reads `render.yaml` (root directory `server`), generates the JWT secret and asks for the remaining secrets. Confirm that `/health` returns `{"ok":true,"db":"up"}`.
 6. **Vercel (frontend).** Import the repository with root directory `client`; set `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_SOCKET_URL` to the Render URL, `NEXTAUTH_URL` and `NEXT_PUBLIC_LMS_URL` to the Vercel URL, and a fresh `NEXTAUTH_SECRET`; deploy.
 7. **Connect them.** Set `CLIENT_ORIGIN` on Render to the Vercel URL and redeploy. Optionally attach the custom domain `lms.kidsintech.school`.
@@ -577,11 +579,12 @@ Redeployment happens automatically on push to `main`. Rollback is one action on 
 | CLIENT_ORIGIN | Render | Vercel production URL; used for CORS and Socket.IO |
 | CLOUDINARY_URL | Render (secret) | Durable file storage |
 | SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, MAIL_FROM | Render (secret) | Transactional email |
-| PAYSTACK_SECRET_KEY | Render (secret) | Test mode; also used to verify webhook signatures |
+| FLW_SECRET_KEY | Render (secret) | Test mode. Unset, the gateway simulates, so local work and CI need no account |
+| FLW_WEBHOOK_HASH | Render (secret) | The dashboard's webhook secret hash, compared against the `verif-hash` header |
 | NEXT_PUBLIC_API_URL, NEXT_PUBLIC_SOCKET_URL | Vercel | Render URL |
 | NEXTAUTH_URL, NEXT_PUBLIC_LMS_URL | Vercel | Vercel production URL |
 | NEXTAUTH_SECRET | Vercel (secret) | Session encryption key |
-| NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY | Vercel | Public key for the payment popup |
+| NEXT_PUBLIC_FLW_PUBLIC_KEY | Vercel | Public key for the inline checkout. Inlined at build time, so a change needs a redeploy |
 
 **Table 4.1: Production environment variables**
 

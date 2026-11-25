@@ -45,3 +45,6 @@ desktop.ini
 # Vercel / Turbo
 .vercel
 .turbo
+
+# Claude Code local tooling (dev-server config, local permissions).
+.claude/

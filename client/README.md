@@ -90,7 +90,7 @@ Documented in `.env.example`. Highlights:
 | `NEXT_PUBLIC_API_URL`             | KITOS API base URL (axios services read this)                |
 | `NEXT_PUBLIC_SOCKET_URL`          | Socket.IO endpoint — normally the same origin as the API      |
 | `NEXT_PUBLIC_API_MOCKING`         | `enabled` starts MSW; anything else (the default) is off      |
-| `NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY` | Paystack test public key (`pk_test_…`)                       |
+| `NEXT_PUBLIC_FLW_PUBLIC_KEY`      | Flutterwave test public key (`FLWPUBK_TEST-…`)                |
 | `GOOGLE_CLIENT_ID`                | Google OAuth client ID (optional)                            |
 | `GOOGLE_CLIENT_SECRET`            | Google OAuth client secret (optional)                        |
 

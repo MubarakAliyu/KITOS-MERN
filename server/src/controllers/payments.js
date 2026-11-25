@@ -1,5 +1,5 @@
 import * as paymentService from "../services/payment.service.js";
-import { verifyWebhookSignature, isSimulated } from "../lib/paystack.js";
+import { verifyWebhookHash, isSimulated } from "../lib/flutterwave.js";
 import { renderReceiptPdf } from "../lib/receiptPdf.js";
 import { logger } from "../lib/logger.js";
 import { clientIp, logActivity } from "../lib/audit.js";
@@ -47,51 +47,48 @@ export const postVerifyPayment = handle(async (req, res) => {
 });
 
 /**
- * `POST /paystack/webhook` — public, authenticated by signature.
+ * `POST /payments/webhook` — public, authenticated by the `verif-hash`
+ * header.
  *
- * `req.body` is a Buffer here: the route mounts a raw body parser, because
- * the HMAC is over the exact bytes Paystack sent. Re-serialising parsed JSON
- * changes key order and whitespace, and the signature would never match.
- *
- * Paystack retries anything that is not a 2xx, so every outcome that is not
- * worth retrying answers 200 — including a signature we reject, which will
+ * Flutterwave retries anything that is not a 2xx, so every outcome that is
+ * not worth retrying answers 200 — including a hash we reject, which will
  * never become valid however many times it is sent.
+ *
+ * Two things this deliberately does not do. It does not need the raw body:
+ * `verif-hash` is a static secret chosen in the dashboard, not an HMAC over
+ * the bytes, so there is nothing for a raw parser to preserve. And it does
+ * not act on the body it just authenticated — `handleWebhook` re-verifies
+ * the transaction against the API, because a static header secret says
+ * nothing about whether the figures in the body are genuine (ADR-036).
  */
-export const postPaystackWebhook = handle(async (req, res) => {
-  const signature = req.get("x-paystack-signature");
-  const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from("");
+export const postPaymentWebhook = handle(async (req, res) => {
+  const hash = req.get("verif-hash");
 
   if (isSimulated()) {
-    // No secret key means no way to verify a signature, so the endpoint
+    // No secret key means nothing to re-verify against, so the endpoint
     // cannot be trusted and must not act. Saying so plainly beats appearing
     // to work in an environment where it provably cannot.
-    logger.warn("Paystack webhook received while in simulated mode; ignoring");
+    logger.warn(
+      "Flutterwave webhook received while in simulated mode; ignoring"
+    );
     return res.status(200).json({
       received: true,
       handled: false,
-      reason: "Simulated mode: no secret key to verify a signature with",
+      reason: "Simulated mode: no Flutterwave key to verify against",
     });
   }
 
-  if (!verifyWebhookSignature({ rawBody, signature })) {
+  if (!verifyWebhookHash({ hash })) {
     logger.warn(
-      { ip: clientIp(req), has_signature: Boolean(signature) },
-      "Paystack webhook signature rejected"
+      { ip: clientIp(req), has_hash: Boolean(hash) },
+      "Flutterwave webhook hash rejected"
     );
-    // 200, deliberately: a forged signature is not a transient failure, and
-    // a 4xx would have Paystack retry it for hours. Nothing is acted on.
+    // 200, deliberately: a wrong hash is not a transient failure, and a 4xx
+    // would have Flutterwave retry it for hours. Nothing is acted on.
     return res.status(200).json({ received: true, handled: false });
   }
 
-  let event;
-  try {
-    event = JSON.parse(rawBody.toString("utf8"));
-  } catch {
-    logger.warn("Paystack webhook body was not JSON");
-    return res.status(200).json({ received: true, handled: false });
-  }
-
-  const result = await paymentService.handleWebhook({ event });
+  const result = await paymentService.handleWebhook({ event: req.body });
   res.status(200).json(result);
 });
 

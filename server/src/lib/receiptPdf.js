@@ -143,7 +143,7 @@ export function renderReceiptPdf(receipt) {
         "Payment type",
         receipt.type === "subscription" ? "Monthly subscription" : "One-time payment",
       ],
-      ["Transaction reference", receipt.paystack_ref || "—"],
+      ["Transaction reference", receipt.tx_ref || "—"],
     ];
 
     for (const [label, value] of rows) {
@@ -186,7 +186,7 @@ export function renderReceiptPdf(receipt) {
      * Said on the document itself, not only in the dashboard.
      *
      * A receipt is the thing a family keeps and may show to someone else, so
-     * if it was settled in Paystack's test mode it has to say so — a receipt
+     * if it was settled in a test mode it has to say so — a receipt
      * that looks like proof of a real payment and is not would be the one
      * genuinely misleading artefact this system could produce.
      */

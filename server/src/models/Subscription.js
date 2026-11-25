@@ -4,7 +4,7 @@ import { serializePlugin } from "../lib/serialize.js";
 /**
  * A recurring plan for one child on one course (PRD §8.2, FR16).
  *
- * KITOS does not charge the card itself — Paystack does, and a successful
+ * KITOS does not charge the card itself — Flutterwave does, and a successful
  * subscription payment arrives as a webhook. So this document records what
  * the family signed up to and when the next charge is due; it is not a
  * billing engine, and nothing here moves money.

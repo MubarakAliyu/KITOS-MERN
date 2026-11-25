@@ -16,7 +16,7 @@ import {
   isSimulated,
   newReference,
   verifyTransaction,
-} from "../lib/paystack.js";
+} from "../lib/flutterwave.js";
 import { enrol } from "./enrollment.service.js";
 import { notify } from "./notification.service.js";
 
@@ -27,6 +27,11 @@ import { notify } from "./notification.service.js";
  * never from the request**. The retained modal sends an `amount` because its
  * mock handlers did; it is accepted by the validator and ignored here. A
  * browser that could set the price would be the whole of the vulnerability.
+ *
+ * The gateway is Flutterwave (ADR-036), reached only through
+ * `lib/flutterwave.js`. Nothing in this file knows which provider is behind
+ * that module, or that Flutterwave quotes amounts in naira — every figure
+ * here is integer kobo, and the wrapper converts at its own edge.
  */
 
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
@@ -46,7 +51,7 @@ function serializePayment(row) {
     amount_kobo: row.amount_kobo,
     type: row.type,
     status: row.status,
-    paystack_ref: row.paystack_ref,
+    tx_ref: row.tx_ref,
     receipt_no: row.receipt_no ?? null,
     created_at: row.created_at?.toISOString() ?? null,
     paid_at: row.paid_at?.toISOString() ?? null,
@@ -106,7 +111,7 @@ async function resolveFamily({ user, studentId }) {
 /**
  * Opens a payment (PRD §11.1 step 1).
  *
- * Creates the pending row first and then asks Paystack to initialise, so a
+ * Creates the pending row first and then asks the gateway to initialise, so a
  * transaction that is started but never completed is still visible to an
  * administrator as a pending payment rather than vanishing.
  */
@@ -131,7 +136,7 @@ export async function initiatePayment({ user, payload }) {
   const reference = newReference();
 
   const payment = await Payment.create({
-    paystack_ref: reference,
+    tx_ref: reference,
     parent_id: parent._id,
     student_id: student._id,
     course_id: course._id,
@@ -148,11 +153,12 @@ export async function initiatePayment({ user, payload }) {
     const gateway = await initializeTransaction({
       reference,
       amountKobo,
-      // Paystack requires an email; a child has none (FR16, PRD §10), so the
-      // paying parent's address is the right one and the one a receipt
+      // Flutterwave requires an email; a child has none (FR16, PRD §10), so
+      // the paying parent's address is the right one and the one a receipt
       // should reach anyway.
       email: parent.email,
-      callbackUrl: `${env.CLIENT_ORIGIN}/parent/payments?ref=${reference}`,
+      name: parent.name,
+      redirectUrl: `${env.CLIENT_ORIGIN}/parent/payments?tx_ref=${reference}`,
       metadata: {
         student_id: String(student._id),
         course_id: String(course._id),
@@ -162,15 +168,16 @@ export async function initiatePayment({ user, payload }) {
 
     return {
       reference,
-      access_code: gateway.access_code,
-      authorization_url: gateway.authorization_url,
+      // The hosted Standard checkout URL. The modal only follows it when it
+      // has no public key to open the inline overlay with.
+      link: gateway.link,
       amount: koboToNaira(amountKobo),
       amount_kobo: amountKobo,
       simulated: Boolean(gateway.simulated),
       payment: serializePayment(payment),
     };
   } catch (err) {
-    // Paystack refused to open it, so the row would stay pending for ever.
+    // The gateway refused to open it, so the row would stay pending for ever.
     payment.status = "failed";
     payment.gateway_response = err.message?.slice(0, 300) ?? "Initialise failed";
     await payment.save();
@@ -179,6 +186,58 @@ export async function initiatePayment({ user, payload }) {
       "The payment provider did not accept the request. Please try again."
     );
   }
+}
+
+/**
+ * Reads back a payment that another caller is in the middle of confirming.
+ *
+ * Claiming the row and doing the side effects cannot be one atomic step. The
+ * receipt number comes from a counter, and taking one *before* winning the
+ * claim would burn a number on every loser, leaving gaps in a sequence the
+ * school's books are expected to be able to account for.
+ *
+ * So there is a window — milliseconds wide — in which the payment is already
+ * `paid` but its receipt number has not been written yet. A caller reading
+ * the row inside that window is told, correctly, that the payment succeeded,
+ * and handed a receipt with no number on it. The retained success screen and
+ * receipt modal both render that field, so the parent would be looking at a
+ * blank where their receipt number should be. This waits the window out
+ * rather than reporting a half-written row.
+ *
+ * It was found by racing two verifies over HTTP against a running API, not by
+ * the unit test for the same race: the in-memory replica set settles the
+ * transaction fast enough that the window almost never opens.
+ *
+ * The deadline matters as much as the wait. If the winner's transaction
+ * failed outright its receipt number is never coming, and blocking for ever
+ * would be worse than answering with what is actually there — so this gives
+ * up, says so in the log, and returns the row.
+ */
+async function readSettled(paymentId, { timeoutMs = 3000, stepMs = 50 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let payment = await Payment.findById(paymentId);
+
+  // Only a `paid` row is waited on. A `failed` one has no receipt number
+  // coming either, and spinning on it would add three seconds to every
+  // declined card.
+  while (
+    payment &&
+    payment.status === "paid" &&
+    !payment.receipt_no &&
+    Date.now() < deadline
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+    payment = await Payment.findById(paymentId);
+  }
+
+  if (payment?.status === "paid" && !payment.receipt_no) {
+    logger.warn(
+      { payment_id: String(paymentId) },
+      "Payment is paid but no receipt number appeared; the confirming caller may have failed"
+    );
+  }
+
+  return payment;
 }
 
 /**
@@ -196,31 +255,34 @@ export async function initiatePayment({ user, payload }) {
  * fail on write conflict rather than being correctly idempotent.
  */
 export async function confirmPayment({ reference, via, gatewayData = {} }) {
-  const payment = await Payment.findOne({ paystack_ref: reference });
+  const payment = await Payment.findOne({ tx_ref: reference });
   if (!payment) throw notFound("That payment reference is not recognised");
 
   // Already done: hand back what exists. This is the idempotent path and it
   // is the common one, because the webhook almost always follows a verify.
   if (payment.status === "paid") {
     logger.debug({ reference, via }, "Payment already confirmed; ignoring");
-    return { payment: serializePayment(payment), already_confirmed: true };
+    const settled = (await readSettled(payment._id)) ?? payment;
+    return { payment: serializePayment(settled), already_confirmed: true };
   }
 
   if (gatewayData.status && gatewayData.status !== "success") {
     payment.status = "failed";
     payment.gateway_response =
-      gatewayData.gateway_response ?? `Paystack reported ${gatewayData.status}`;
+      gatewayData.gateway_response ??
+      `The gateway reported ${gatewayData.status}`;
     payment.confirmed_via = via;
     await payment.save();
     return { payment: serializePayment(payment), already_confirmed: false };
   }
 
   /**
-   * What Paystack says was paid must match what we asked for.
+   * What the gateway says was paid must match what we asked for.
    *
    * Without this an attacker could initialise a ₦25,000 enrolment, pay ₦100
-   * on their own Paystack account, and present that reference. The amount is
-   * only compared when the gateway reported one.
+   * on their own Flutterwave account, and present that reference. The amount
+   * is only compared when the gateway reported one, and the wrapper has
+   * already converted it from naira to kobo so this compares integers.
    */
   if (
     typeof gatewayData.amount === "number" &&
@@ -248,8 +310,9 @@ export async function confirmPayment({ reference, via, gatewayData = {} }) {
   );
 
   if (!claimed) {
-    // Someone else won the race between our read and our update.
-    const settled = await Payment.findById(payment._id);
+    // Someone else won the race between our read and our update, so wait for
+    // them to finish writing before reporting what they wrote.
+    const settled = await readSettled(payment._id);
     return { payment: serializePayment(settled), already_confirmed: true };
   }
 
@@ -384,13 +447,13 @@ async function notifyConfirmation(payment) {
 }
 
 /**
- * `POST /paystack/verify` (PRD §11.1 steps 2 and 4).
+ * `POST /payments/verify` (PRD §11.1 steps 2 and 4).
  *
  * The caller supplies a reference and nothing else that matters: the amount,
  * course and child all come from the payment row we created at initiate.
  */
 export async function verifyPayment({ user, payload }) {
-  const payment = await Payment.findOne({ paystack_ref: payload.reference });
+  const payment = await Payment.findOne({ tx_ref: payload.reference });
   if (!payment) throw notFound("That payment reference is not recognised");
 
   if (
@@ -421,44 +484,66 @@ export async function verifyPayment({ user, payload }) {
 }
 
 /**
- * `POST /paystack/webhook` (PRD §11.1 step 3).
+ * `POST /payments/webhook` (PRD §11.1 step 3).
  *
- * The signature is checked in the route, on the raw body, before this runs.
- * Paystack retries a webhook it does not get a 200 for, so anything that is
- * not actionable still answers 200 — a 500 would earn an endless retry for an
- * event we were never going to act on.
+ * The `verif-hash` header is checked in the controller before this runs.
+ * Flutterwave retries a webhook it does not get a 200 for, so anything that
+ * is not actionable still answers 200 — a 500 would earn an endless retry for
+ * an event we were never going to act on.
+ *
+ * **The body is used for one thing only: to learn which reference to go and
+ * ask about.** Every figure that decides the outcome comes from a fresh
+ * `verify_by_reference` call. This is not caution for its own sake —
+ * Flutterwave authenticates its webhooks with a static shared secret rather
+ * than a per-request body signature (see `lib/flutterwave.js`), so a matching
+ * `verif-hash` does not establish that the amounts in the body are the ones
+ * Flutterwave recorded. Trusting `data.amount` here would hand anyone who
+ * ever learns the hash a way to mark a ₦25,000 enrolment paid for nothing.
  */
 export async function handleWebhook({ event }) {
   const type = event?.event;
-  const reference = event?.data?.reference;
+  // v3 sends our own `tx_ref`; `txRef` appears in some older payloads.
+  const reference = event?.data?.tx_ref ?? event?.data?.txRef;
 
   if (!reference) {
-    logger.warn({ type }, "Paystack webhook with no reference; ignoring");
+    logger.warn({ type }, "Flutterwave webhook with no tx_ref; ignoring");
     return { received: true, handled: false };
   }
 
-  if (type !== "charge.success" && type !== "subscription.create") {
-    logger.debug({ type, reference }, "Paystack webhook we do not act on");
+  if (type && type !== "charge.completed") {
+    logger.debug({ type, reference }, "Flutterwave webhook we do not act on");
     return { received: true, handled: false };
   }
 
-  const exists = await Payment.exists({ paystack_ref: reference });
-  if (!exists) {
+  const payment = await Payment.findOne({ tx_ref: reference });
+  if (!payment) {
     // A reference we never issued: either another integration on the same
-    // Paystack account, or someone probing the endpoint.
-    logger.warn({ type, reference }, "Paystack webhook for an unknown reference");
+    // Flutterwave account, or someone probing the endpoint.
+    logger.warn(
+      { type, reference },
+      "Flutterwave webhook for an unknown reference"
+    );
     return { received: true, handled: false };
   }
+
+  // Already settled, so there is nothing to ask the gateway about. Checked
+  // before the API call rather than after, because the webhook usually
+  // follows a verify the parent's own browser already completed, and a
+  // network round trip to re-learn "still paid" is wasted on every retry.
+  if (payment.status === "paid") {
+    return { received: true, handled: true, already_confirmed: true };
+  }
+
+  // The authoritative read. Anything the body claimed is discarded.
+  const gatewayData = await verifyTransaction({
+    reference,
+    expectedAmountKobo: payment.amount_kobo,
+  });
 
   const result = await confirmPayment({
     reference,
     via: "webhook",
-    gatewayData: {
-      status: event.data?.status,
-      amount: event.data?.amount,
-      gateway_response: event.data?.gateway_response,
-      channel: event.data?.channel,
-    },
+    gatewayData,
   });
 
   return {
@@ -508,7 +593,7 @@ export async function listPayments({ user, query = {} }) {
         row.parent_name,
         row.student_name,
         row.course_title,
-        row.paystack_ref,
+        row.tx_ref,
         row.receipt_no,
       ]
         .filter(Boolean)
@@ -637,8 +722,8 @@ export async function listSubscriptions({ user }) {
 /**
  * `POST /subscriptions/cancel`.
  *
- * Marks the plan cancelled here. It does **not** cancel anything at Paystack,
- * because KITOS never created a Paystack subscription object — each month is
+ * Marks the plan cancelled here. It does **not** cancel anything at
+ * Flutterwave, because KITOS never created a payment plan there — each month is
  * charged as its own transaction — so there is nothing there to cancel. The
  * effect is that no further month is expected, and the next charge simply
  * never arrives. Said plainly rather than implied, because "cancelled" could

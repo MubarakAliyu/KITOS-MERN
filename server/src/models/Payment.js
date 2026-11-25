@@ -7,14 +7,18 @@ import { serializePlugin } from "../lib/serialize.js";
  * Money is stored as integer kobo and serialised to naira for the frontend
  * (ADR-002). Nothing in this file holds a float.
  *
- * `paystack_ref` is unique, and that index is what makes confirmation
+ * `tx_ref` is unique, and that index is what makes confirmation
  * idempotent: verify and the webhook both arrive for the same reference, in
  * either order and sometimes at once, and both must end with one paid payment
  * and one activated enrolment (AC3.3).
+ *
+ * The field was `paystack_ref` until ADR-036 moved the platform to
+ * Flutterwave. `tx_ref` is both Flutterwave's own name for it and a name no
+ * future provider change has to touch.
  */
 const paymentSchema = new mongoose.Schema({
-  /** Our own reference, `KIT-<ulid>`, sent to Paystack as the transaction ref. */
-  paystack_ref: { type: String, required: true },
+  /** Our own reference, `KIT-<ulid>`, sent to the gateway as its `tx_ref`. */
+  tx_ref: { type: String, required: true },
 
   parent_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -73,14 +77,14 @@ const paymentSchema = new mongoose.Schema({
     default: null,
   },
 
-  /** What Paystack said, kept for reconciliation. Never trusted for amounts. */
+  /** What the gateway said, kept for reconciliation. Never trusted for amounts. */
   gateway_response: { type: String, default: null },
   channel: { type: String, default: null },
 });
 
 paymentSchema.plugin(serializePlugin);
 
-paymentSchema.index({ paystack_ref: 1 }, { unique: true });
+paymentSchema.index({ tx_ref: 1 }, { unique: true });
 paymentSchema.index({ parent_id: 1, created_at: -1 });
 paymentSchema.index({ student_id: 1, created_at: -1 });
 paymentSchema.index({ status: 1, created_at: -1 });

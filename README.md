@@ -75,7 +75,7 @@ services never see `req`, so every rule is testable without an HTTP layer.
 
 ## Running it locally
 
-Node 22 and npm. Nothing else — no Atlas account, no SMTP, no Paystack keys.
+Node 22 and npm. Nothing else — no Atlas account, no SMTP, no Flutterwave keys.
 
 ```bash
 npm --prefix server install
@@ -208,7 +208,8 @@ Where the PRD and a batch prompt disagree, the PRD wins, and the conflict is rec
 - Nine colour pairings in the brand palette fail WCAG AA contrast. The product owner has decided the
   emerald palette stands, so this is an accepted, documented exception (ADR-020) — not an open
   defect. The exemption is a fixed list matched by exact colour, so new violations still fail CI.
-- Paystack runs in test mode only.
+- Flutterwave runs in test mode only (ADR-036). With no key configured the gateway simulates,
+  so the four-step payment flow works offline and in CI with no account at all.
 
 ## Licence and credits
 

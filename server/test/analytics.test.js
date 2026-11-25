@@ -49,7 +49,7 @@ async function makeCourse(overrides = {}) {
 
 async function paidPayment({ course, parent, student, type, monthsAgo, amountKobo }) {
   const payment = await Payment.create({
-    paystack_ref: `KIT-TEST-${Math.random().toString(36).slice(2, 12)}`,
+    tx_ref: `KIT-TEST-${Math.random().toString(36).slice(2, 12)}`,
     parent_id: parent._id,
     student_id: student._id,
     course_id: course._id,
@@ -109,7 +109,7 @@ describe("GET /admin/stats", () => {
       monthsAgo: 0,
     });
     await Payment.create({
-      paystack_ref: "KIT-PENDING-1",
+      tx_ref: "KIT-PENDING-1",
       parent_id: family.parent._id,
       student_id: family.student._id,
       course_id: course._id,

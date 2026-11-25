@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import request from "supertest";
-import crypto from "node:crypto";
 import { app, makeUser, makeFamily, auth, resetState } from "./helpers.js";
 import { Course } from "../src/models/Course.js";
 import { Enrollment } from "../src/models/Enrollment.js";
@@ -10,9 +9,16 @@ import { Notification } from "../src/models/Notification.js";
 import { ActivityLog } from "../src/models/ActivityLog.js";
 import { Counter } from "../src/models/Counter.js";
 import { resetEnvCache } from "../src/config/env.js";
-import { verifyWebhookSignature } from "../src/lib/paystack.js";
+import { verifyWebhookHash } from "../src/lib/flutterwave.js";
 
 let server;
+
+/**
+ * The real `fetch`, kept so a test that stubs Flutterwave's API can restore
+ * it. Without this a stub leaks into every later test in the file, and the
+ * failure shows up somewhere unrelated.
+ */
+const realFetch = globalThis.fetch;
 
 beforeEach(async () => {
   await resetState();
@@ -36,10 +42,10 @@ async function makeCourse(overrides = {}) {
 }
 
 const initiate = (parent, body) =>
-  request(server).post("/paystack/initiate").set(auth(parent)).send(body);
+  request(server).post("/payments/initiate").set(auth(parent)).send(body);
 
 const verify = (parent, body) =>
-  request(server).post("/paystack/verify").set(auth(parent)).send(body);
+  request(server).post("/payments/verify").set(auth(parent)).send(body);
 
 /** Opens a payment and returns its reference. */
 async function openPayment({ parent, student, course, type = "one_time" }) {
@@ -69,7 +75,7 @@ describe("initiating a payment", () => {
     expect(res.body.simulated).toBe(true);
     expect(res.body.amount).toBe(15000);
 
-    const payment = await Payment.findOne({ paystack_ref: res.body.reference });
+    const payment = await Payment.findOne({ tx_ref: res.body.reference });
     expect(payment.status).toBe("pending");
     expect(payment.amount_kobo).toBe(FEE_KOBO);
     // Snapshotted, so a later rename cannot rewrite a receipt.
@@ -92,7 +98,7 @@ describe("initiating a payment", () => {
     });
 
     expect(res.status).toBe(201);
-    const payment = await Payment.findOne({ paystack_ref: res.body.reference });
+    const payment = await Payment.findOne({ tx_ref: res.body.reference });
     expect(payment.amount_kobo).toBe(FEE_KOBO);
   });
 
@@ -152,7 +158,7 @@ describe("confirming a payment", () => {
     expect(res.body.payment.status).toBe("paid");
     expect(res.body.payment.receipt_no).toMatch(/^RCP-\d{6}-\d{4}$/);
     // Simulated, and labelled as such, so no receipt can be mistaken for one
-    // Paystack settled.
+    // the gateway settled.
     expect(res.body.payment.confirmed_via).toBe("simulated");
 
     const enrolment = await Enrollment.findOne({
@@ -240,20 +246,24 @@ describe("confirming a payment", () => {
 
     const { handleWebhook } = await import("../src/services/payment.service.js");
 
+    /**
+     * Note what the webhook event carries: a reference and nothing else.
+     * Since ADR-036 the body is only a prompt to go and ask the API, so a
+     * status or an amount here would be ignored — and in simulated mode the
+     * gateway answers for the fee on the row, which is the same path a live
+     * re-verification takes.
+     */
     const [viaVerify, viaWebhook] = await Promise.all([
       verify(parent, { reference }),
       handleWebhook({
-        event: {
-          event: "charge.success",
-          data: { reference, status: "success", amount: FEE_KOBO },
-        },
+        event: { event: "charge.completed", data: { tx_ref: reference } },
       }),
     ]);
 
     expect(viaVerify.status).toBe(200);
     expect(viaWebhook.received).toBe(true);
 
-    const payments = await Payment.find({ paystack_ref: reference });
+    const payments = await Payment.find({ tx_ref: reference });
     expect(payments).toHaveLength(1);
     expect(payments[0].status).toBe("paid");
 
@@ -277,6 +287,84 @@ describe("confirming a payment", () => {
     // And one receipt number was consumed, not two.
     const counters = await Counter.find({ _id: /^receipt:/ });
     expect(counters[0].seq).toBe(1);
+  });
+
+  /**
+   * The window between claiming a payment and writing its receipt number.
+   *
+   * Found by racing two verifies over HTTP against the running API: the
+   * loser was told `already_confirmed: true` and handed a paid payment whose
+   * `receipt_no` was still null, which the success screen and the receipt
+   * modal both render. The unit test for the same race never caught it,
+   * because the in-memory replica set settles the transaction before the
+   * second caller gets a chance to look.
+   *
+   * So this opens the window deliberately rather than hoping to hit it: a
+   * row that is already `paid` with no number yet, and a number that arrives
+   * shortly afterwards, exactly as the winning caller's transaction would
+   * deliver it.
+   */
+  it("waits for the receipt number rather than reporting a half-written row", async () => {
+    const { parent, student } = await makeFamily();
+    const course = await makeCourse();
+    const reference = await openPayment({ parent, student, course });
+
+    const { confirmPayment } = await import("../src/services/payment.service.js");
+
+    // Mid-confirmation: claimed by someone else, number not written yet.
+    await Payment.updateOne(
+      { tx_ref: reference },
+      { $set: { status: "paid", paid_at: new Date(), confirmed_via: "verify" } }
+    );
+
+    const writeNumberSoon = new Promise((resolve) => {
+      setTimeout(async () => {
+        await Payment.updateOne(
+          { tx_ref: reference },
+          { $set: { receipt_no: "RCP-209901-0001" } }
+        );
+        resolve();
+      }, 150);
+    });
+
+    const [result] = await Promise.all([
+      confirmPayment({ reference, via: "webhook", gatewayData: {} }),
+      writeNumberSoon,
+    ]);
+
+    expect(result.already_confirmed).toBe(true);
+    expect(result.payment.receipt_no).toBe("RCP-209901-0001");
+  });
+
+  /**
+   * And the other half of the same guard: a failed payment has no receipt
+   * number coming either, so waiting on one would add the full timeout to
+   * every declined card.
+   */
+  it("does not wait on a failed payment that will never have a number", async () => {
+    const { parent, student } = await makeFamily();
+    const course = await makeCourse();
+    const reference = await openPayment({ parent, student, course });
+
+    const { confirmPayment } = await import("../src/services/payment.service.js");
+
+    await confirmPayment({
+      reference,
+      via: "webhook",
+      gatewayData: { status: "failed", gateway_response: "Declined" },
+    });
+
+    const started = Date.now();
+    const result = await confirmPayment({
+      reference,
+      via: "webhook",
+      gatewayData: { status: "failed" },
+    });
+    const elapsed = Date.now() - started;
+
+    expect(result.payment.status).toBe("failed");
+    // Comfortably under the 3s deadline the wait would otherwise burn.
+    expect(elapsed).toBeLessThan(1000);
   });
 
   it("issues each payment its own receipt number", async () => {
@@ -322,7 +410,7 @@ describe("confirming a payment", () => {
 
   /**
    * Without this an attacker could open a ₦25,000 enrolment, pay ₦100 on
-   * their own Paystack account and present that reference.
+   * their own Flutterwave account and present that reference.
    */
   it("refuses a payment whose amount does not match the course fee", async () => {
     const { parent, student } = await makeFamily();
@@ -339,7 +427,7 @@ describe("confirming a payment", () => {
       })
     ).rejects.toThrow(/does not match the course fee/i);
 
-    const payment = await Payment.findOne({ paystack_ref: reference });
+    const payment = await Payment.findOne({ tx_ref: reference });
     expect(payment.status).toBe("failed");
     expect(await Enrollment.countDocuments({})).toBe(0);
   });
@@ -357,7 +445,7 @@ describe("confirming a payment", () => {
       gatewayData: { status: "abandoned", gateway_response: "Cancelled" },
     });
 
-    const payment = await Payment.findOne({ paystack_ref: reference });
+    const payment = await Payment.findOne({ tx_ref: reference });
     expect(payment.status).toBe("failed");
     expect(await Enrollment.countDocuments({})).toBe(0);
   });
@@ -365,38 +453,74 @@ describe("confirming a payment", () => {
 
 // ── The webhook ─────────────────────────────────────────────────────────────
 
-describe("the Paystack webhook", () => {
-  const SECRET = "sk_test_webhook_secret_for_tests";
+describe("the Flutterwave webhook", () => {
+  const SECRET = "FLWSECK_TEST-for-tests";
+  const HASH = "a-secret-hash-set-in-the-dashboard";
+  const WEBHOOK_REF = "KIT-WEBHOOK-TEST-0001";
 
-  /** Live mode: the signature can only be checked when a key is configured. */
+  /** Live mode: the hash can only be checked when one is configured. */
   beforeEach(() => {
-    process.env.PAYSTACK_SECRET_KEY = SECRET;
+    process.env.FLW_SECRET_KEY = SECRET;
+    process.env.FLW_WEBHOOK_HASH = HASH;
     resetEnvCache();
     server = app();
   });
 
   afterEach(() => {
-    delete process.env.PAYSTACK_SECRET_KEY;
+    delete process.env.FLW_SECRET_KEY;
+    delete process.env.FLW_WEBHOOK_HASH;
     resetEnvCache();
+    globalThis.fetch = realFetch;
   });
 
-  const sign = (body) =>
-    crypto.createHmac("sha512", SECRET).update(body).digest("hex");
+  /** One transaction as `verify_by_reference` reports it. Amounts in naira. */
+  const transaction = (overrides = {}) => ({
+    tx_ref: WEBHOOK_REF,
+    status: "successful",
+    currency: "NGN",
+    // 15,000 naira - the fee, in Flutterwave's units, not kobo.
+    amount: 15000,
+    // Includes Flutterwave's cut. Comparing against this instead of `amount`
+    // would reject every genuine payment, so a fixture that differs from
+    // `amount` is the point.
+    charged_amount: 15210,
+    processor_response: "Approved",
+    payment_type: "card",
+    flw_ref: "FLW-TEST-REF-1",
+    ...overrides,
+  });
 
-  const post = (body, signature) =>
+  /**
+   * Flutterwave's API, stubbed, returning `data` and recording its calls.
+   *
+   * Every webhook test needs one: since ADR-036 the webhook ignores the body
+   * it was sent and asks the API what actually happened. The recorded calls
+   * are what let a test prove the network was *not* reached.
+   */
+  function stubApi(data, { envelope = "success" } = {}) {
+    const calls = [];
+    globalThis.fetch = async (url) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify({ status: envelope, data }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    return calls;
+  }
+
+  const post = (body, hash) =>
     request(server)
-      .post("/paystack/webhook")
-      .set("Content-Type", "application/json")
-      .set(signature ? { "x-paystack-signature": signature } : {})
+      .post("/payments/webhook")
+      .set(hash ? { "verif-hash": hash } : {})
       .send(body);
 
-  async function paidPaymentRef() {
+  /** A pending payment, written directly: this is not a test of initiate. */
+  async function pendingPayment() {
     const { parent, student } = await makeFamily();
     const course = await makeCourse();
-    // Initiate would call Paystack for real in live mode, so the row is
-    // written directly — this test is about the signature, not the gateway.
     const payment = await Payment.create({
-      paystack_ref: "KIT-WEBHOOK-TEST-0001",
+      tx_ref: WEBHOOK_REF,
       parent_id: parent._id,
       student_id: student._id,
       course_id: course._id,
@@ -407,24 +531,30 @@ describe("the Paystack webhook", () => {
       type: "one_time",
       status: "pending",
     });
-    return { reference: payment.paystack_ref, student, course };
+    return { reference: payment.tx_ref, parent, student, course };
   }
 
-  it("confirms a correctly signed charge.success", async () => {
-    const { reference, student, course } = await paidPaymentRef();
-    const body = JSON.stringify({
-      event: "charge.success",
-      data: { reference, status: "success", amount: FEE_KOBO, channel: "card" },
-    });
+  const event = (overrides = {}) => ({
+    event: "charge.completed",
+    data: { tx_ref: WEBHOOK_REF, ...overrides },
+  });
 
-    const res = await post(body, sign(body));
+  it("confirms a charge.completed when the hash matches and the API agrees", async () => {
+    const { reference, student, course } = await pendingPayment();
+    const calls = stubApi(transaction());
+
+    const res = await post(event(), HASH);
 
     expect(res.status).toBe(200);
     expect(res.body.handled).toBe(true);
 
-    const payment = await Payment.findOne({ paystack_ref: reference });
+    const payment = await Payment.findOne({ tx_ref: reference });
     expect(payment.status).toBe("paid");
     expect(payment.confirmed_via).toBe("webhook");
+    // A fee reported in naira was stored as kobo, neither multiplied by a
+    // hundred nor divided by one.
+    expect(payment.amount_kobo).toBe(FEE_KOBO);
+
     expect(
       await Enrollment.countDocuments({
         student_id: student._id,
@@ -432,125 +562,185 @@ describe("the Paystack webhook", () => {
         status: "active",
       })
     ).toBe(1);
+
+    // It really did re-verify, by reference.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("/v3/transactions/verify_by_reference");
+    expect(calls[0]).toContain(reference);
   });
 
-  it("ignores a wrong signature, and answers 200 so Paystack stops retrying", async () => {
-    const { reference } = await paidPaymentRef();
-    const body = JSON.stringify({
-      event: "charge.success",
-      data: { reference, status: "success", amount: FEE_KOBO },
-    });
+  it("ignores a wrong hash, and answers 200 so Flutterwave stops retrying", async () => {
+    const { reference } = await pendingPayment();
+    const calls = stubApi(transaction());
 
-    const res = await post(body, sign(body + "tampered"));
+    const res = await post(event(), HASH + "-wrong");
 
-    // 200 deliberately: a forged signature will never become valid, and a
-    // 4xx would earn hours of retries.
+    // 200 deliberately: a wrong hash will never become right, and a 4xx
+    // would earn hours of retries.
     expect(res.status).toBe(200);
     expect(res.body.handled).toBe(false);
-    expect((await Payment.findOne({ paystack_ref: reference })).status).toBe(
+    expect((await Payment.findOne({ tx_ref: reference })).status).toBe(
       "pending"
     );
+    // Rejected before the gateway was ever asked.
+    expect(calls).toHaveLength(0);
   });
 
-  it("ignores a missing signature", async () => {
-    const { reference } = await paidPaymentRef();
-    const body = JSON.stringify({
-      event: "charge.success",
-      data: { reference, status: "success", amount: FEE_KOBO },
-    });
+  it("ignores a missing hash", async () => {
+    const { reference } = await pendingPayment();
+    const calls = stubApi(transaction());
 
-    const res = await post(body, null);
+    const res = await post(event(), null);
 
     expect(res.status).toBe(200);
     expect(res.body.handled).toBe(false);
-    expect((await Payment.findOne({ paystack_ref: reference })).status).toBe(
+    expect((await Payment.findOne({ tx_ref: reference })).status).toBe(
       "pending"
     );
+    expect(calls).toHaveLength(0);
   });
 
   /**
-   * A signature is over the exact bytes. Changing a value but keeping the
-   * body the same length is the case a naive length-only check would pass.
+   * The reason the re-verification exists (ADR-036).
+   *
+   * `verif-hash` is a static secret, so anyone who learns it can send any
+   * body they like. Here the body claims a successful full-fee charge and
+   * the API says the transaction failed. The API wins.
    */
-  it("ignores a body altered after signing", async () => {
-    const { reference } = await paidPaymentRef();
-    const signed = JSON.stringify({
-      event: "charge.success",
-      data: { reference, status: "success", amount: 100 },
-    });
-    const tampered = signed.replace('"amount":100', '"amount":999');
+  it("does not trust a correctly hashed body the API contradicts", async () => {
+    const { reference } = await pendingPayment();
+    stubApi(transaction({ status: "failed", processor_response: "Declined" }));
 
-    const res = await post(tampered, sign(signed));
+    const res = await post(
+      event({ status: "successful", amount: 15000, charged_amount: 15000 }),
+      HASH
+    );
 
     expect(res.status).toBe(200);
-    expect(res.body.handled).toBe(false);
+    const payment = await Payment.findOne({ tx_ref: reference });
+    expect(payment.status).toBe("failed");
+    expect(payment.gateway_response).toMatch(/declined/i);
+    expect(await Enrollment.countDocuments({})).toBe(0);
+  });
+
+  /**
+   * The same attack by the other route: a body claiming the full fee while
+   * the transaction the API knows about was for 100 naira.
+   */
+  it("refuses a re-verified amount that does not match the course fee", async () => {
+    const { reference } = await pendingPayment();
+    stubApi(transaction({ amount: 100 }));
+
+    const res = await post(event({ amount: 15000 }), HASH);
+
+    // The service throws, so the endpoint reports an error rather than
+    // quietly swallowing it. Nothing is confirmed either way.
+    expect(res.status).toBeGreaterThanOrEqual(400);
+
+    const payment = await Payment.findOne({ tx_ref: reference });
+    expect(payment.status).toBe("failed");
+    expect(payment.gateway_response).toMatch(/mismatch/i);
+    expect(await Enrollment.countDocuments({})).toBe(0);
+  });
+
+  it("refuses a transaction paid in another currency", async () => {
+    const { reference } = await pendingPayment();
+    stubApi(transaction({ currency: "USD", amount: 15000 }));
+
+    await post(event(), HASH);
+
+    const payment = await Payment.findOne({ tx_ref: reference });
+    expect(payment.status).toBe("failed");
+    expect(payment.gateway_response).toMatch(/USD/);
+    expect(await Enrollment.countDocuments({})).toBe(0);
+  });
+
+  it("refuses a transaction the gateway answers about under another reference", async () => {
+    const { reference } = await pendingPayment();
+    stubApi(transaction({ tx_ref: "KIT-SOMEONE-ELSES-REF" }));
+
+    await post(event(), HASH);
+
+    const payment = await Payment.findOne({ tx_ref: reference });
+    expect(payment.status).toBe("failed");
+    expect(await Enrollment.countDocuments({})).toBe(0);
   });
 
   it("is a no-op when replayed, however many times", async () => {
-    const { reference } = await paidPaymentRef();
-    const body = JSON.stringify({
-      event: "charge.success",
-      data: { reference, status: "success", amount: FEE_KOBO },
-    });
-    const signature = sign(body);
+    await pendingPayment();
+    stubApi(transaction());
 
-    const first = await post(body, signature);
-    const second = await post(body, signature);
-    const third = await post(body, signature);
+    const first = await post(event(), HASH);
+    const second = await post(event(), HASH);
+    const third = await post(event(), HASH);
 
     expect(first.body.already_confirmed).toBe(false);
     expect(second.body.already_confirmed).toBe(true);
     expect(third.body.already_confirmed).toBe(true);
 
     expect(await Enrollment.countDocuments({})).toBe(1);
-    expect(await ActivityLog.countDocuments({ action: "payment_confirmed" })).toBe(1);
+    expect(
+      await ActivityLog.countDocuments({ action: "payment_confirmed" })
+    ).toBe(1);
   });
 
   it("ignores an event type it does not act on", async () => {
-    const { reference } = await paidPaymentRef();
-    const body = JSON.stringify({
-      event: "charge.failed",
-      data: { reference, status: "failed" },
-    });
+    const { reference } = await pendingPayment();
+    const calls = stubApi(transaction());
 
-    const res = await post(body, sign(body));
+    const res = await post(
+      { event: "transfer.completed", data: { tx_ref: reference } },
+      HASH
+    );
 
     expect(res.body.handled).toBe(false);
-    expect((await Payment.findOne({ paystack_ref: reference })).status).toBe(
+    expect((await Payment.findOne({ tx_ref: reference })).status).toBe(
       "pending"
     );
+    expect(calls).toHaveLength(0);
   });
 
-  it("ignores a reference it never issued", async () => {
-    const body = JSON.stringify({
-      event: "charge.success",
-      data: { reference: "KIT-SOMEONE-ELSES-REF", status: "success", amount: 1 },
-    });
+  it("ignores a reference it never issued, without calling the gateway", async () => {
+    const calls = stubApi(transaction());
 
-    const res = await post(body, sign(body));
+    const res = await post(event({ tx_ref: "KIT-NEVER-ISSUED" }), HASH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.handled).toBe(false);
+    // An unknown reference must not become a way to make us call out.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("ignores an event with no reference at all", async () => {
+    const res = await post({ event: "charge.completed", data: {} }, HASH);
 
     expect(res.status).toBe(200);
     expect(res.body.handled).toBe(false);
   });
 
-  it("rejects a signature of the wrong length without throwing", () => {
-    expect(
-      verifyWebhookSignature({ rawBody: Buffer.from("{}"), signature: "short" })
-    ).toBe(false);
+  it("rejects a hash of the wrong length without throwing", () => {
+    // `timingSafeEqual` throws on unequal lengths, so the length check is
+    // not an optimisation - without it this is a 500 on every short guess.
+    expect(verifyWebhookHash({ hash: "short" })).toBe(false);
+    expect(verifyWebhookHash({ hash: HASH + "-longer" })).toBe(false);
+    expect(verifyWebhookHash({ hash: HASH })).toBe(true);
   });
 });
 
+
 describe("the webhook in simulated mode", () => {
   /**
-   * With no secret key there is no way to verify a signature, so the endpoint
-   * must not act. Appearing to work where it provably cannot is worse than
-   * saying so.
+   * With no secret key there is nothing to re-verify against, so the
+   * endpoint must not act. Appearing to work where it provably cannot is
+   * worse than saying so.
+   *
+   * This is also what keeps the endpoint safe by default: a deployment that
+   * forgets `FLW_WEBHOOK_HASH` does not get a webhook that trusts anyone.
    */
   it("refuses to act, and says why", async () => {
     const res = await request(server)
-      .post("/paystack/webhook")
-      .set("Content-Type", "application/json")
-      .send(JSON.stringify({ event: "charge.success", data: { reference: "x" } }));
+      .post("/payments/webhook")
+      .send({ event: "charge.completed", data: { tx_ref: "x" } });
 
     expect(res.status).toBe(200);
     expect(res.body.handled).toBe(false);
@@ -667,7 +857,7 @@ describe("reading payments", () => {
     const { parent, student } = await makeFamily();
     const course = await makeCourse();
     const reference = await openPayment({ parent, student, course });
-    const pending = await Payment.findOne({ paystack_ref: reference });
+    const pending = await Payment.findOne({ tx_ref: reference });
 
     const res = await request(server)
       .get(`/payments/${pending._id}/receipt`)

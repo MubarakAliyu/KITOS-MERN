@@ -59,9 +59,17 @@ const schema = z.object({
    */
   MAIL_REPLY_TO: z.string().trim().default("hello@kidsintech.school"),
 
-  // Batch 3. Absent in development: /paystack/initiate then returns a
-  // simulated reference so the existing four-step modal still works.
-  PAYSTACK_SECRET_KEY: z.string().trim().optional(),
+  /**
+   * Batch 3, Flutterwave (ADR-036). Absent in development and CI:
+   * /payments/initiate then returns a simulated reference so the existing
+   * four-step modal still works with no account.
+   *
+   * `FLW_WEBHOOK_HASH` is the secret hash set on the dashboard's webhook
+   * page. Without it the webhook route rejects every call, which is the
+   * right default: a webhook that cannot be authenticated must not act.
+   */
+  FLW_SECRET_KEY: z.string().trim().optional(),
+  FLW_WEBHOOK_HASH: z.string().trim().optional(),
 
   // Guards the demo seed in production (PRD §15.2, Batch 1 Part F).
   ALLOW_DEMO_SEED: z

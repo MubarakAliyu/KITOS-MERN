@@ -517,7 +517,7 @@ const STUDENT_PROGRESS = {
 
 // Unified payments table — sourced by every payment-related endpoint
 // (parent /payments?parent_id=…, admin /admin/payments, stats, receipt).
-// Mutated in-place by POST /paystack/verify so the UI can re-fetch and see
+// Mutated in-place by POST /payments/verify so the UI can re-fetch and see
 // newly-confirmed transactions consistently across roles.
 const PAYMENTS_DB = [
   {
@@ -529,7 +529,7 @@ const PAYMENTS_DB = [
     amount: 15000,
     type: "subscription",
     status: "paid",
-    paystack_ref: "PSK_123456",
+    tx_ref: "KIT-MOCK-123456",
     course_id: "c1",
     course_title: "Scratch Programming",
     created_at: "2025-04-01T00:00:00Z",
@@ -544,7 +544,7 @@ const PAYMENTS_DB = [
     amount: 20000,
     type: "one_time",
     status: "paid",
-    paystack_ref: "PSK_234567",
+    tx_ref: "KIT-MOCK-234567",
     course_id: "c2",
     course_title: "Web Development",
     created_at: "2025-03-15T00:00:00Z",
@@ -559,7 +559,7 @@ const PAYMENTS_DB = [
     amount: 15000,
     type: "subscription",
     status: "paid",
-    paystack_ref: "PSK_345678",
+    tx_ref: "KIT-MOCK-345678",
     course_id: "c1",
     course_title: "Scratch Programming",
     created_at: "2025-03-01T00:00:00Z",
@@ -574,7 +574,7 @@ const PAYMENTS_DB = [
     amount: 25000,
     type: "subscription",
     status: "pending",
-    paystack_ref: "PSK_456789",
+    tx_ref: "KIT-MOCK-456789",
     course_id: "c3",
     course_title: "Robotics Basics",
     created_at: "2025-04-20T00:00:00Z",
@@ -589,7 +589,7 @@ const PAYMENTS_DB = [
     amount: 15000,
     type: "subscription",
     status: "failed",
-    paystack_ref: "PSK_567890",
+    tx_ref: "KIT-MOCK-567890",
     course_id: "c1",
     course_title: "Scratch Programming",
     created_at: "2025-04-18T00:00:00Z",
@@ -1407,16 +1407,19 @@ export const handlers = [
     return HttpResponse.json({ success: true, plan });
   }),
 
-  http.post("*/paystack/initiate", async () => {
-    const ref = `PSK_${Date.now()}`;
+  http.post("*/payments/initiate", async () => {
+    const ref = `KIT-MOCK-${Date.now()}`;
     return HttpResponse.json({
-      access_code: `mock_access_${Date.now()}`,
       reference: ref,
-      authorization_url: "#mock_payment_page",
+      link: "#mock_payment_page",
+      // The mock stands in for an API with no Flutterwave key, so the modal
+      // takes the same branch it takes in simulated mode and never tries to
+      // open a real checkout.
+      simulated: true,
     });
   }),
 
-  http.post("*/paystack/verify", async ({ request }) => {
+  http.post("*/payments/verify", async ({ request }) => {
     const body = await request.json().catch(() => ({}));
     // Resolve course + parent so the persisted row carries display fields.
     const course = COURSES.find((c) => c.id === body.course_id);
@@ -1430,7 +1433,7 @@ export const handlers = [
       amount: Number(body.amount ?? course?.price ?? 0),
       type: body.type ?? course?.payment_type ?? "one_time",
       status: "paid",
-      paystack_ref: body.reference ?? `PSK_${Date.now()}`,
+      tx_ref: body.reference ?? `KIT-MOCK-${Date.now()}`,
       course_id: body.course_id,
       course_title: course?.title ?? body.course_title ?? "",
       created_at: new Date().toISOString(),
@@ -1445,7 +1448,7 @@ export const handlers = [
       user_id: created.parent_id,
       type: "payment_success",
       title: "Payment Confirmed",
-      message: `₦${created.amount.toLocaleString("en-NG")} payment for ${created.course_title} was successful. Reference: ${created.paystack_ref}`,
+      message: `₦${created.amount.toLocaleString("en-NG")} payment for ${created.course_title} was successful. Reference: ${created.tx_ref}`,
       is_read: false,
       created_at: new Date().toISOString(),
       link: "/parent/payments",
@@ -1453,7 +1456,7 @@ export const handlers = [
 
     return HttpResponse.json({
       status: "success",
-      reference: created.paystack_ref,
+      reference: created.tx_ref,
       payment: created,
     });
   }),

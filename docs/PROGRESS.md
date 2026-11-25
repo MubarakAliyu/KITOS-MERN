@@ -222,12 +222,13 @@ product owner on 23 October:
   matched by exact colour pair, per node.
 - Batches 2 and 3 are not built; the screens that need them render empty states against endpoints
   that return empty, correctly shaped data (ADR-018).
-- Paystack is test mode only.
+- Flutterwave is test mode only (ADR-036, which replaced Paystack on 25 Nov 2026). With no key
+  configured the gateway simulates, so nothing in local development or CI needs an account.
 
 **Needs the student**
 
 1. **Create the GitHub repository and push** — the remote `MubarakAliyu/KITOS-MERN` does not exist yet
    and `gh` is not authenticated here, so CI has never run. Commands are in the Batch 1 hand-off.
-2. Accounts for Batch 3: MongoDB Atlas, Render, Vercel, Cloudinary, SMTP, Paystack test keys.
+2. Accounts for Batch 3: MongoDB Atlas, Render, Vercel, Cloudinary, SMTP, Flutterwave test keys.
 3. Answers to PRD §17: the production domains, course fee amounts, a native-speaker pass on the Hausa
    strings, and which KIT address sends mail.

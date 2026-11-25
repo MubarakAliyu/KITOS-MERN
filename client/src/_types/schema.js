@@ -146,7 +146,7 @@
  * @property {number} amount
  * @property {string} type             e.g. "subscription" | "one_time" — confirm enum with backend.
  * @property {string} status           e.g. "pending" | "success" | "failed" — confirm enum with backend.
- * @property {string} paystack_ref
+ * @property {string} tx_ref
  * @property {string} created_at       ISO 8601.
  */
 

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
 import { differenceInDays } from "date-fns";
+import { toast } from "sonner";
 import {
   Bar,
   BarChart,
@@ -28,12 +29,13 @@ import {
   getPayments,
   getPaymentStats,
   getSubscriptions,
+  verifyPayment,
 } from "@/_lib/api/payments";
 import { useCountUp } from "@/_hooks/useCountUp";
 import { formatNaira } from "@/_lib/utils/formatters";
 import PaymentTable from "@/_components/payment/PaymentTable";
 import ReceiptModal from "@/_components/payment/ReceiptModal";
-import PaystackModal from "@/_components/payment/PaystackModal";
+import CheckoutModal from "@/_components/payment/CheckoutModal";
 import SubscriptionCard from "@/_components/payment/SubscriptionCard";
 
 // Resolved via session context on backend.
@@ -52,8 +54,11 @@ export default function ParentPaymentsPage() {
   const [error, setError] = useState(null);
   const [range, setRange] = useState("all");
   const [receiptPayment, setReceiptPayment] = useState(null);
-  const [showPaystack, setShowPaystack] = useState(false);
+  const [showCheckout, setShowCheckout] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const returningRef = searchParams.get("tx_ref");
 
   useEffect(() => {
     setLoading(true);
@@ -74,6 +79,52 @@ export default function ParentPaymentsPage() {
       })
       .finally(() => setLoading(false));
   }, [pathname]);
+
+  /**
+   * Returning from the hosted checkout (ADR-036).
+   *
+   * The API sets Flutterwave's `redirect_url` to this page with `?tx_ref=…`,
+   * which is the only signal a parent who paid on the hosted page gives us —
+   * there is no modal left to close. So verify once, clear the parameter so
+   * a refresh or a shared link cannot re-run it, and refetch.
+   *
+   * Verifying is safe to do here even if the webhook already confirmed the
+   * payment: the server's confirmation is idempotent (AC3.3), so the second
+   * caller is simply told it was already done.
+   */
+  useEffect(() => {
+    if (!returningRef) return;
+    let cancelled = false;
+
+    verifyPayment({ reference: returningRef })
+      .then((result) => {
+        if (cancelled) return;
+        if (result?.status === "success") {
+          toast.success("Payment confirmed.");
+        } else {
+          toast.error("That payment did not complete.");
+        }
+        return Promise.all([getPayments(), getPaymentStats()]).then(
+          ([rows, s]) => {
+            if (cancelled) return;
+            setPayments(rows ?? []);
+            setStats(s ?? null);
+          }
+        );
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("We could not confirm that payment.");
+      })
+      .finally(() => {
+        // Dropped from the URL either way, so the parent does not re-verify
+        // a payment every time they come back to this page.
+        if (!cancelled) router.replace("/parent/payments", { scroll: false });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [returningRef, router]);
 
   const filtered = useMemo(() => {
     if (range === "all") return payments;
@@ -135,7 +186,7 @@ export default function ParentPaymentsPage() {
   }
 
   function handleModalClose() {
-    setShowPaystack(false);
+    setShowCheckout(false);
     // Refetch — a payment may have completed inside the modal.
     Promise.all([
       getPayments(),
@@ -164,7 +215,7 @@ export default function ParentPaymentsPage() {
         </div>
         <motion.button
           type="button"
-          onClick={() => setShowPaystack(true)}
+          onClick={() => setShowCheckout(true)}
           whileHover={{ y: -1 }}
           whileTap={{ scale: 0.97 }}
           className="inline-flex items-center gap-2 self-start rounded-xl bg-[#10B981] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#059669] sm:self-auto"
@@ -190,7 +241,7 @@ export default function ParentPaymentsPage() {
       <SubscriptionsSection
         subscriptions={subscriptions}
         loading={loading}
-        onEnroll={() => setShowPaystack(true)}
+        onEnroll={() => setShowCheckout(true)}
         onCancelled={handleSubscriptionCancelled}
       />
 
@@ -209,7 +260,7 @@ export default function ParentPaymentsPage() {
         isOpen={!!receiptPayment}
         onClose={() => setReceiptPayment(null)}
       />
-      <PaystackModal isOpen={showPaystack} onClose={handleModalClose} />
+      <CheckoutModal isOpen={showCheckout} onClose={handleModalClose} />
     </motion.div>
   );
 }

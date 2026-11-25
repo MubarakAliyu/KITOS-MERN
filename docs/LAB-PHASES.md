@@ -92,7 +92,7 @@ against a real API on a seeded database.
 
 **Still outstanding.** C2.4 and C3.5 (cloud infrastructure and deployment tooling) remain at design
 stage, and C4.1, C4.2, C5.1, C5.2 and C5.3 are Batch 3 work. Those need the student to create the
-accounts first — MongoDB Atlas, Render, Vercel, Cloudinary, SMTP and Paystack test keys — and the
+accounts first — MongoDB Atlas, Render, Vercel, Cloudinary, SMTP and Flutterwave test keys — and the
 GitHub repository `MubarakAliyu/KITOS-MERN`, without which CI cannot actually run. The 10-minute
 recording and the condensed submission report are also Batch 3.
 

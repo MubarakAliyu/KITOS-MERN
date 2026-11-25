@@ -61,16 +61,22 @@ describe("Mongo operator sanitising", () => {
   /**
    * A Buffer is an object, and the first version of this check treated it as
    * a plain one: `Object.entries` walked its bytes and handed back
-   * `{0: 12, 1: 34, …}`. That silently destroyed the raw request body the
-   * Paystack webhook signs over, so a correctly signed webhook was rejected.
+   * `{0: 12, 1: 34, …}`. That silently destroyed the raw request body a
+   * webhook signature was computed over, so a correctly signed webhook was
+   * rejected — and every "bad signature" test passed for the wrong reason.
+   *
+   * No route needs a raw body today (ADR-036: the gateway authenticates with
+   * a header instead), so this guards nothing in production right now. It
+   * stays because the bug was invisible from the outside, and the next raw
+   * body — an upload, another provider — would hit it just as quietly.
    */
   it("leaves a Buffer alone instead of unpacking it into a byte map", () => {
-    const raw = Buffer.from('{"event":"charge.success"}', "utf8");
+    const raw = Buffer.from('{"event":"charge.completed"}', "utf8");
 
     const { value, removed } = sanitizeValue(raw);
 
     expect(Buffer.isBuffer(value)).toBe(true);
-    expect(value.toString("utf8")).toBe('{"event":"charge.success"}');
+    expect(value.toString("utf8")).toBe('{"event":"charge.completed"}');
     expect(removed).toEqual([]);
   });
 

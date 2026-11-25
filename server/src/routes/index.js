@@ -355,14 +355,15 @@ router.get(
 // ── Batch 3: payments (PRD §11.1) ───────────────────────────────────────────
 
 /**
- * Public, and authenticated by signature rather than by token: Paystack
- * calls it, not a browser. The raw body parser is mounted for this path in
- * app.js, because the HMAC is over the exact bytes sent.
+ * Public, and authenticated by the `verif-hash` header rather than by token:
+ * Flutterwave calls it, not a browser. It is deliberately not validated with
+ * Zod — the body is third-party and is never acted on, only read for the
+ * reference to re-verify against the API (ADR-036).
  */
-router.post("/paystack/webhook", c.postPaystackWebhook);
+router.post("/payments/webhook", c.postPaymentWebhook);
 
 router.post(
-  "/paystack/initiate",
+  "/payments/initiate",
   authenticate,
   requirePermission("payment.make"),
   validate({ body: s.initiatePaymentBody }),
@@ -370,7 +371,7 @@ router.post(
 );
 
 router.post(
-  "/paystack/verify",
+  "/payments/verify",
   authenticate,
   requirePermission("payment.make"),
   validate({ body: s.verifyPaymentBody }),

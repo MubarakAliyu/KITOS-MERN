@@ -580,7 +580,7 @@ export async function runSeed({ quiet = false } = {}) {
 
     const paid = entry.status === "paid";
     const payment = await Payment.create({
-      paystack_ref: `KIT-SEED-${String(receiptsIssued + 1).padStart(4, "0")}`,
+      tx_ref: `KIT-SEED-${String(receiptsIssued + 1).padStart(4, "0")}`,
       parent_id: parentUserId,
       student_id: studentProfileId,
       course_id: courseId,

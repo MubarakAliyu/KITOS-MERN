@@ -37,7 +37,7 @@ const eslintConfig = defineConfig([
       "react-hooks/preserve-manual-memoization": "warn",
       "react-hooks/immutability": "warn",
       // `children` is a domain noun here — a parent's children (the pupils)
-      // are passed to ChildSwitcher and the Paystack modal. Renaming the prop
+      // are passed to ChildSwitcher and the checkout modal. Renaming the prop
       // would ripple through four retained components for no behavioural gain.
       "react/no-children-prop": "off",
       // Three decorative <img> tags in retained markup; next/image would
