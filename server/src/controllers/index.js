@@ -3,6 +3,7 @@ import * as userService from "../services/user.service.js";
 import * as adminService from "../services/admin.service.js";
 import * as familyService from "../services/family.service.js";
 import * as settingsService from "../services/settings.service.js";
+import * as analyticsService from "../services/analytics.service.js";
 import * as notificationService from "../services/notification.service.js";
 import { clientIp, logActivity } from "../lib/audit.js";
 import { badRequest } from "../lib/errors.js";
@@ -174,6 +175,10 @@ export const getPendingEnrollments = handle(async (_req, res) => {
 
 export const getAdminStats = handle(async (_req, res) => {
   res.status(200).json(await adminService.getStats());
+});
+
+export const getAdminAnalytics = handle(async (req, res) => {
+  res.status(200).json(await analyticsService.getAnalytics(req.query));
 });
 
 export const postPermissions = handle(async (req, res) => {

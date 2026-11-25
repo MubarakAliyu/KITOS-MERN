@@ -14,7 +14,6 @@ import {
   messageLimiter,
 } from "../middleware/rateLimit.js";
 import * as s from "../validators/schemas.js";
-import { placeholderRouter } from "./placeholders.js";
 import { learningRouter } from "./learning.js";
 
 /**
@@ -164,7 +163,16 @@ router.get(
   "/admin/activity-log",
   authenticate,
   requirePermission("audit.view"),
+  validate({ query: s.activityLogQuery }),
   c.getActivityLog
+);
+
+router.get(
+  "/admin/analytics",
+  authenticate,
+  requirePermission("analytics.view"),
+  validate({ query: s.analyticsQuery }),
+  c.getAdminAnalytics
 );
 
 router.get(
@@ -418,7 +426,3 @@ router.get(
 
 // ── Batch 2: learning, assessment, certificates and sessions ────────────────
 router.use(learningRouter);
-
-// ── Batch 3 placeholders ────────────────────────────────────────────────────
-// Registered last so a real route above always wins. See routes/placeholders.js.
-router.use(placeholderRouter);

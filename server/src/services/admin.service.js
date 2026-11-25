@@ -402,6 +402,11 @@ export async function nextAdmissionNoPreview() {
 
 /**
  * The activity log, newest first, in the shape the admin screen reads.
+ *
+ * Filters are server-side even though the retained screen fetches the page
+ * and narrows it in the browser: the log is append-only and grows for ever,
+ * so "send everything and filter there" stops working long before anyone
+ * notices it has. The screen can adopt them without an API change.
  */
 export async function listActivityLog(query = {}) {
   const { skip, limit } = toSkipLimit({
@@ -409,7 +414,17 @@ export async function listActivityLog(query = {}) {
     limit: query.limit ?? 50,
   });
 
-  const rows = await ActivityLog.find({})
+  const filter = {};
+  if (query.action) filter.action = query.action;
+  if (query.actor_role) filter.actor_role = query.actor_role;
+  if (query.target_type) filter.target_type = query.target_type;
+  if (query.from || query.to) {
+    filter.created_at = {};
+    if (query.from) filter.created_at.$gte = new Date(query.from);
+    if (query.to) filter.created_at.$lte = new Date(query.to);
+  }
+
+  const rows = await ActivityLog.find(filter)
     .sort({ created_at: -1 })
     .skip(skip)
     .limit(limit);
@@ -444,27 +459,13 @@ export async function listPendingEnrollments() {
 /**
  * Platform counts for the admin dashboard tiles.
  *
- * Revenue and subscriptions come from the payments collection in Batch 3; they
- * are 0 here so the tiles render their zero state rather than crash.
+ * Batch 1 returned zeros for revenue, courses and subscriptions because the
+ * collections did not exist yet. They do now, and the real figures — change
+ * arrows included — are computed in `analytics.service.js`, which owns every
+ * number on the admin screens. Re-exported here so the controller keeps one
+ * import.
  */
-export async function getStats() {
-  const [students, instructors] = await Promise.all([
-    User.countDocuments({ role: "student" }),
-    User.countDocuments({ role: "instructor" }),
-  ]);
-
-  return {
-    total_students: students,
-    total_instructors: instructors,
-    total_courses: 0,
-    total_revenue: 0,
-    active_subscriptions: 0,
-    students_change: 0,
-    revenue_change: 0,
-    courses_change: 0,
-    instructors_change: 0,
-  };
-}
+export { getStats } from "./analytics.service.js";
 
 /** True when the id is a well-formed ObjectId, for guard clauses. */
 export function isValidId(id) {

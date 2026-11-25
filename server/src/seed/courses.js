@@ -247,15 +247,20 @@ export const MODULES = [
  * `completed` runs a student all the way through a course so the demo has a
  * real certificate to show, rather than an empty certificates page.
  */
+/**
+ * `monthsAgo` backdates the enrolment, so the analytics trend line has a
+ * shape instead of nothing followed by a vertical jump. It is spread to
+ * roughly match the payments, which is how a real intake would look.
+ */
 export const ENROLMENTS = [
-  { student: "liam", course: "scratch", completed: true },
-  { student: "liam", course: "web", progressLessons: 1 },
-  { student: "aisha", course: "scratch", progressLessons: 2 },
-  { student: "emeka", course: "scratch", progressLessons: 1 },
-  { student: "yusuf", course: "web", progressLessons: 1 },
-  { student: "maryam", course: "scratch" },
-  { student: "daniel", course: "robotics" },
-  { student: "hauwa", course: "web", progressLessons: 2 },
+  { student: "liam", course: "scratch", completed: true, monthsAgo: 4 },
+  { student: "liam", course: "web", progressLessons: 1, monthsAgo: 3 },
+  { student: "aisha", course: "scratch", progressLessons: 2, monthsAgo: 3 },
+  { student: "emeka", course: "scratch", progressLessons: 1, monthsAgo: 2 },
+  { student: "yusuf", course: "web", progressLessons: 1, monthsAgo: 2 },
+  { student: "maryam", course: "scratch", monthsAgo: 1 },
+  { student: "daniel", course: "robotics", monthsAgo: 1 },
+  { student: "hauwa", course: "web", progressLessons: 2, monthsAgo: 0 },
 ];
 
 /**

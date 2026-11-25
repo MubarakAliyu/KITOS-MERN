@@ -571,6 +571,16 @@ export const receiptQuery = z.object({
 
 // ── Admin analytics and audit ───────────────────────────────────────────────
 
+export const activityLogQuery = z.object({
+  // `paginationQuery` is a field map to spread, not a schema to extend.
+  ...paginationQuery,
+  action: z.string().trim().max(60).optional(),
+  actor_role: z.enum([...ROLES, "system"]).optional(),
+  target_type: z.string().trim().max(60).optional(),
+  from: z.string().trim().max(40).optional(),
+  to: z.string().trim().max(40).optional(),
+});
+
 export const analyticsQuery = z.object({
   /** How many months of history the charts cover; the UI shows six. */
   months: z.coerce.number().int().min(1).max(24).optional(),

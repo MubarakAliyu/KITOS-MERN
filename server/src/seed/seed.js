@@ -179,6 +179,19 @@ async function clearCollections() {
  * the current month makes the revenue chart and the chat transcript look
  * wrong in a way that is easy to miss and hard to explain.
  */
+/**
+ * A date `monthsAgo` months back, mid-month and mid-morning.
+ *
+ * Mid-month on purpose: the 1st at midnight falls on a boundary where the
+ * Lagos and UTC months disagree, and every chart buckets in Lagos.
+ */
+function monthsBack(monthsAgo) {
+  const now = new Date();
+  const date = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 14);
+  date.setHours(10, 30, 0, 0);
+  return date;
+}
+
 async function backdate(Model, id, when) {
   await Model.collection.updateOne(
     { _id: id },
@@ -412,7 +425,7 @@ export async function runSeed({ quiet = false } = {}) {
     const courseId = courseIds.get(entry.course);
     if (!studentId || !courseId) continue;
 
-    await Enrollment.create({
+    const enrolment = await Enrollment.create({
       student_id: studentId,
       course_id: courseId,
       status: "active",
@@ -420,6 +433,12 @@ export async function runSeed({ quiet = false } = {}) {
       progress: 0,
       last_activity_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
     });
+
+    // The analytics trend line buckets on this, so a whole intake dated
+    // today draws nothing followed by a vertical jump.
+    if (entry.monthsAgo !== undefined) {
+      await backdate(Enrollment, enrolment._id, monthsBack(entry.monthsAgo));
+    }
 
     const lessons = lessonsByCourse.get(String(courseId)) ?? [];
 
@@ -540,17 +559,6 @@ export async function runSeed({ quiet = false } = {}) {
   say("Recording payments…");
 
   let receiptsIssued = 0;
-
-  /** The first of a month, `monthsAgo` back from today. */
-  function monthsBack(monthsAgo) {
-    const now = new Date();
-    const date = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 1);
-    // Mid-month and mid-morning, so a payment never lands on a boundary
-    // where the Lagos and UTC months disagree.
-    date.setDate(14);
-    date.setHours(10, 30, 0, 0);
-    return date;
-  }
 
   for (const entry of PAYMENTS) {
     const courseId = courseIds.get(entry.course);
