@@ -155,9 +155,23 @@ Students sign in with an **admission number**, everyone else with an email addre
 Two seeded accounts exist to exercise the unhappy paths: `KIT/26/003` is deactivated, and `KIT/26/008`
 has no parental consent on record, so neither can sign in.
 
-These passwords are for a local database. The seed refuses to run against production unless
-`ALLOW_DEMO_SEED=true` and three 10+ character passwords are supplied, and it then writes them to a
-git-ignored `docs/DEMO-ACCOUNTS.md` instead of printing them.
+**These passwords are published — this table is the whole of their secrecy.** They are for a
+database on your own machine, and two guards keep them off a live one:
+
+- **The destination.** The seed refuses to run against a database that is not on this machine —
+  any `mongodb+srv://` URI, or a `mongodb://` host that is not loopback — unless
+  `NODE_ENV=production`. This exists because the other guard is not enough on its own: a seed run
+  against Atlas with `NODE_ENV` unset takes the development branch, ignores the passwords it was
+  given, and writes the table above to a live site, reporting success. `NODE_ENV` is a thing
+  someone forgets; the host in the connection string is a fact about where the data is going.
+- **The credentials.** With `NODE_ENV=production` the seed additionally requires
+  `ALLOW_DEMO_SEED=true` and `DEMO_ADMIN_PASSWORD`, `DEMO_STAFF_PASSWORD` and
+  `DEMO_FAMILY_PASSWORD`, each at least 10 characters. It then writes them to a git-ignored
+  `docs/DEMO-ACCOUNTS.md` rather than printing them, so they are not left in a terminal scrollback.
+
+Whichever ran, the summary says which: `DEMO_*_PASSWORD environment variables`, or `development
+defaults (client/src/HANDOFF.md)`. On a deployed site that line is the difference between a seeded
+demo and a public one — `docs/DEPLOYMENT.md` step 8 has the full command.
 
 ### Email without a mail server
 
