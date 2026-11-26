@@ -560,7 +560,14 @@ export async function runSeed({ quiet = false } = {}) {
 
   let receiptsIssued = 0;
 
-  for (const entry of PAYMENTS) {
+  // `index` numbers the reference; `receiptsIssued` counts only money that
+  // arrived. They were the same counter once, and that was a bug: a pending
+  // or failed fixture left `receiptsIssued` where it was, so the next paid
+  // payment reused its reference and the unique index on `tx_ref` rejected
+  // the seed with E11000. It survived local runs because a fresh database
+  // has not finished building that index when the seed writes, and only
+  // failed against a production database where the index already existed.
+  for (const [index, entry] of PAYMENTS.entries()) {
     const courseId = courseIds.get(entry.course);
     const course = COURSES.find((c) => c.key === entry.course);
     const studentProfileId = studentIdByKey.get(entry.student);
@@ -580,7 +587,9 @@ export async function runSeed({ quiet = false } = {}) {
 
     const paid = entry.status === "paid";
     const payment = await Payment.create({
-      tx_ref: `KIT-SEED-${String(receiptsIssued + 1).padStart(4, "0")}`,
+      // From the fixture's own position, so every seeded payment has a
+      // distinct reference whatever its status.
+      tx_ref: `KIT-SEED-${String(index + 1).padStart(4, "0")}`,
       parent_id: parentUserId,
       student_id: studentProfileId,
       course_id: courseId,
