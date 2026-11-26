@@ -283,6 +283,27 @@ export async function submitQuiz({ user, quizId, answers }) {
 
 // ── Assignments ─────────────────────────────────────────────────────────────
 
+/**
+ * The marking settings from a create or update payload.
+ *
+ * Only keys the caller actually sent are returned, so an update that touches
+ * the title alone does not quietly reset the max score to its default.
+ */
+function gradingFrom(payload) {
+  const out = {};
+  if (payload.submission_types !== undefined) {
+    out.submission_types = payload.submission_types;
+  }
+  if (payload.max_score !== undefined) out.max_score = payload.max_score;
+  if (payload.grade_type !== undefined) out.grade_type = payload.grade_type;
+  if (payload.allow_late !== undefined) out.allow_late = payload.allow_late;
+  if (payload.late_penalty !== undefined) {
+    // A penalty only means anything when late work is accepted at all.
+    out.late_penalty = payload.allow_late === false ? null : payload.late_penalty;
+  }
+  return out;
+}
+
 export async function createAssignment({ user, payload }) {
   const module = await Module.findById(payload.module_id);
   if (!module) {
@@ -299,6 +320,9 @@ export async function createAssignment({ user, payload }) {
     title: toPlainText(payload.title, 160),
     instructions: toPlainText(payload.instructions ?? "", 4000),
     deadline: payload.deadline ? new Date(payload.deadline) : null,
+    // How it is handed in and marked. The modal has always asked for these;
+    // until now the API discarded the answers along with the request.
+    ...gradingFrom(payload),
   });
 
   await recalculateCourse(course._id);
@@ -310,6 +334,11 @@ function serializeAssignment(assignment, extra = {}) {
     id: String(assignment._id),
     module_id: String(assignment.module_id),
     course_id: String(assignment.course_id),
+    submission_types: assignment.submission_types ?? [],
+    max_score: assignment.max_score ?? 100,
+    grade_type: assignment.grade_type ?? "percentage",
+    allow_late: Boolean(assignment.allow_late),
+    late_penalty: assignment.late_penalty ?? null,
     title: assignment.title,
     instructions: assignment.instructions,
     deadline: assignment.deadline
@@ -335,6 +364,9 @@ export async function updateAssignment({ user, assignmentId, payload }) {
   if (payload.deadline !== undefined) {
     assignment.deadline = payload.deadline ? new Date(payload.deadline) : null;
   }
+  // Only the marking settings this request actually carried, so editing a
+  // title does not reset the max score to its default.
+  Object.assign(assignment, gradingFrom(payload));
 
   await assignment.save();
   return serializeAssignment(assignment);

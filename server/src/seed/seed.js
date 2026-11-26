@@ -273,6 +273,155 @@ async function backdate(Model, id, when) {
   );
 }
 
+/**
+ * Is this a minimal seed? `SEED_MODE=minimal`.
+ *
+ * Read from `process.env` directly rather than through the validated `env`
+ * object, so adding a mode does not require a schema change to run it once.
+ */
+export function isMinimalSeed() {
+  return String(process.env.SEED_MODE ?? "").trim().toLowerCase() === "minimal";
+}
+
+/**
+ * An empty platform with four accounts and nothing else.
+ *
+ * For a real deployment the school will fill themselves: every collection is
+ * wiped, then one admin, one instructor, one parent and that parent's one
+ * child are created, plus the platform settings row the UI reads for its
+ * name and colour. No courses, cohorts, enrolments, sessions, payments,
+ * certificates or conversations — the demo fixtures are what you get from
+ * the full seed, and they are not what you want on a live site.
+ *
+ * The admission counter is wiped with everything else, so the seeded pupil
+ * is KIT/26/001 and the next pupil the school adds is KIT/26/002.
+ *
+ * Same guards as the full seed: it refuses a remote database unless
+ * NODE_ENV=production, and in production it needs ALLOW_DEMO_SEED and the
+ * three DEMO_*_PASSWORD values. The passwords are the point here — a minimal
+ * seed exists to start a real site, and starting one with the published
+ * demo credentials is exactly the accident this guards against.
+ */
+async function runMinimalSeed({ say, passwords, hashes }) {
+  say("Clearing every collection…");
+  await clearCollections();
+
+  say("Writing platform settings…");
+  await Setting.create({ key: "platform", ...SETTINGS, permissions: [] });
+
+  say("Creating the four starting accounts…");
+
+  const admin = await User.create({
+    role: "admin",
+    name: "KIT Administrator",
+    email: "admin@kidsintech.school",
+    password_hash: hashes.admin,
+    must_reset_password: false,
+    is_active: true,
+  });
+
+  const instructor = await User.create({
+    role: "instructor",
+    name: "KIT Instructor",
+    email: "instructor@kidsintech.school",
+    password_hash: hashes.staff,
+    must_reset_password: false,
+    is_active: true,
+  });
+
+  const parent = await User.create({
+    role: "parent",
+    name: "KIT Parent",
+    email: "parent@kidsintech.school",
+    password_hash: hashes.family,
+    must_reset_password: false,
+    is_active: true,
+  });
+
+  // The counter was wiped above, so this is the first number of the year.
+  const year = admissionYear();
+  const admissionNo = `KIT/${year}/${formatAdmissionSequence(1)}`;
+  await ensureSequenceAtLeast(admissionCounterKey(year), 1);
+
+  const studentUser = await User.create({
+    role: "student",
+    name: "KIT Student",
+    admission_no: admissionNo,
+    password_hash: hashes.student,
+    must_reset_password: false,
+    is_active: true,
+  });
+
+  const profile = await Student.create({
+    user_id: studentUser._id,
+    parent_id: parent._id,
+    name: studentUser.name,
+    age: 12,
+    programme_track: "scratch",
+    status: "active",
+  });
+
+  /**
+   * Consent, recorded as evidence rather than assumed.
+   *
+   * A child's account is pending until a parent has consented (PRD §10), and
+   * an active account with no consent row behind it would be a child-safety
+   * gap dressed up as convenience. The seed is the parent here, and says so
+   * in the user agent.
+   */
+  const consent = await Consent.create({
+    parent_id: parent._id,
+    student_id: profile._id,
+    version: CONSENT_CURRENT_VERSION,
+    scopes: [...CONSENT_SCOPES],
+    accepted_at: new Date(),
+    ip: "127.0.0.1",
+    user_agent: "KITOS minimal seed",
+  });
+  profile.consent_id = consent._id;
+  await profile.save();
+
+  await ActivityLog.create({
+    actor_role: "system",
+    actor_name: "Minimal seed",
+    action: "seeded_database",
+    description:
+      "Minimal seed: platform settings and four accounts; every other " +
+      "collection was cleared",
+    target_type: "database",
+    meta: { source: passwords.source, mode: "minimal" },
+  });
+
+  return {
+    mode: "minimal",
+    admins: 1,
+    instructors: 1,
+    parents: 1,
+    students: 1,
+    cohorts: 0,
+    courses: 0,
+    modules: 0,
+    enrolments: 0,
+    sessions: 0,
+    certificates: 0,
+    payments: 0,
+    receipts: 0,
+    subscriptions: 0,
+    conversations: 0,
+    messages: 0,
+    firstAdmission: admissionNo,
+    lastAdmission: admissionNo,
+    nextAdmission: `KIT/${year}/${formatAdmissionSequence(2)}`,
+    accounts: {
+      admin: admin.email,
+      instructor: instructor.email,
+      parent: parent.email,
+      student: admissionNo,
+    },
+    passwordSource: passwords.source,
+  };
+}
+
 export async function runSeed({ quiet = false } = {}) {
   const say = quiet ? () => {} : (msg) => console.log(msg);
 
@@ -281,6 +430,13 @@ export async function runSeed({ quiet = false } = {}) {
 
   const passwords = resolvePasswords();
   const hashes = await hashAll(passwords);
+
+  // Both guards above apply to the minimal seed too — it is the mode most
+  // likely to be pointed at a real database, so it is the last one that
+  // should be allowed to skip them.
+  if (isMinimalSeed()) {
+    return runMinimalSeed({ say, passwords, hashes });
+  }
 
   say("Clearing the seeded collections…");
   await clearCollections();
@@ -932,7 +1088,21 @@ async function main() {
       console.log(`    Instructor   instructor@kidsintech.school   ${DEV_PASSWORDS.staff}`);
       console.log(`    Parent       parent@kidsintech.school       ${DEV_PASSWORDS.family}`);
       console.log(`    Student      ${summary.firstAdmission}                    ${DEV_PASSWORDS.student}`);
-      console.log(`    Force reset  amina@gmail.com                ${DEV_PASSWORDS.forceReset}`);
+      // The force-reset demo account only exists in the full seed; listing
+      // it after a minimal run would send someone looking for an account
+      // that was deliberately not created.
+      if (summary.mode !== "minimal") {
+        console.log(`    Force reset  amina@gmail.com                ${DEV_PASSWORDS.forceReset}`);
+      }
+    }
+    if (summary.mode === "minimal") {
+      console.log(
+        `
+  Minimal seed: platform settings and these four accounts only.` +
+          `
+  Every other collection was cleared. The next pupil you add is ` +
+          `${summary.nextAdmission}.`
+      );
     }
     console.log("");
   } finally {

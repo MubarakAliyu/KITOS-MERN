@@ -8,6 +8,7 @@ import { z } from "zod";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { createLesson } from "@/_lib/api/instructor";
+import { apiErrorMessage } from "@/_lib/api/errors";
 
 const CONTENT_TYPES = ["video", "text", "file", "link"];
 
@@ -79,8 +80,8 @@ export default function AddLessonModal({
       toast.success("Lesson added");
       onCreated?.(created);
       onClose?.();
-    } catch {
-      toast.error("Couldn't add lesson");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Couldn't add lesson"));
     }
   }
 

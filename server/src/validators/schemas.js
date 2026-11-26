@@ -15,7 +15,47 @@ import {
  * `.strict()` is deliberate on write bodies: an unexpected field is a sign the
  * client and the API disagree, and silently ignoring it hides the bug. Read
  * queries are lenient, since a stray `?t=` cache-buster should not 400.
+ *
+ * Strictness earns its keep only if the schemas actually name everything the
+ * retained forms send. They did not, and nine of sixteen admin and instructor
+ * writes answered 400 in production as a result — see `blank` below, and
+ * `test/admin-forms.test.js`, which posts the exact payload each form builds.
  */
+
+/**
+ * An HTML form's "not filled in" is an empty string, not an absent key.
+ *
+ * A `<select>` with no choice made submits `""`; a cleared number input
+ * coerces to `0` or `NaN`; a field the UI hides for the chosen role still
+ * sits in the form state and is sent. `z.optional()` accepts none of those,
+ * so an optional field that the user simply left alone failed validation —
+ * which is how creating an instructor died on `age` and `programme_track`,
+ * two fields the form does not even show for that role.
+ *
+ * This maps those three spellings of "nothing" onto `undefined` before the
+ * inner schema sees them. It is applied per field rather than globally,
+ * because `""` is a legitimate value in a few places (clearing a bio) and
+ * guessing wrong in bulk would be its own bug.
+ */
+const blank = (schema) =>
+  z.preprocess((value) => {
+    if (value === "" || value === null) return undefined;
+    if (typeof value === "number" && Number.isNaN(value)) return undefined;
+    return value;
+  }, schema.optional());
+
+/**
+ * A key the UI sends that the API neither stores nor needs.
+ *
+ * Accepted and dropped, rather than rejected. These are values a form
+ * derived for its own display — the instructor's name looked up from the id
+ * it is already sending, say — and refusing the whole request over one is a
+ * 400 the user cannot act on. Each use names what the field is and why it is
+ * safe to lose, so this cannot quietly become a dumping ground: anything
+ * that carries information the API should keep belongs in the schema
+ * properly, with a model field behind it.
+ */
+const ignored = z.any().optional().transform(() => undefined);
 
 const password = z
   .string({ error: "A password is required" })
@@ -137,25 +177,50 @@ export const createUserBody = z
   .object({
     role: z.enum(ROLES).default("student"),
     name,
-    email: email.optional(),
-    age: age.optional(),
-    programme_track: programmeTrack.optional(),
-    parent_id: objectIdSchema.optional(),
-    language_preference: z.enum(LANGUAGES).optional(),
+    /**
+     * Optional for everyone here, and required for staff and parents by the
+     * refinement below.
+     *
+     * A pupil signs in with an admission number and is not required to have
+     * an email at all (FR16, PRD §10) — so the form sends `null` for them,
+     * and `email.optional()` rejected it, because `.optional()` admits
+     * `undefined` and not `null`. Creating a pupil without an email address
+     * was therefore impossible, which is the one case the field exists to
+     * allow.
+     */
+    email: blank(email),
+    age: blank(age),
+    programme_track: blank(programmeTrack),
+    parent_id: blank(objectIdSchema),
+    language_preference: blank(z.enum(LANGUAGES)),
+    // A profile note the Add User modal collects. `User.bio` has always
+    // existed; only the schema was missing it.
+    bio: z.string().trim().max(200).nullish(),
     // The admin "Add User" modal posts this when it is draining a pending
     // enrolment request.
-    pending_id: objectIdSchema.optional(),
+    pending_id: blank(objectIdSchema),
   })
-  .strict();
+  .strict()
+  .superRefine((data, ctx) => {
+    // Everyone who signs in with an address needs one. A pupil does not.
+    if (data.role !== "student" && !data.email) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["email"],
+        message: "An email address is required for this role",
+      });
+    }
+  });
 
 export const updateUserBody = z
   .object({
     name: name.optional(),
-    email: email.nullish(),
+    email: blank(email),
     role: z.enum(ROLES).optional(),
-    age: age.optional(),
-    programme_track: programmeTrack.optional(),
-    language_preference: z.enum(LANGUAGES).optional(),
+    age: blank(age),
+    programme_track: blank(programmeTrack),
+    language_preference: blank(z.enum(LANGUAGES)),
+    bio: z.string().trim().max(200).nullish(),
     phone,
   })
   .strict();
@@ -273,12 +338,34 @@ export const createCourseBody = z
     title: courseTitle,
     description: z.string().trim().max(2000).optional(),
     thumbnail: z.string().trim().max(500).nullish(),
-    programme_track: z.string().trim().min(1, "A programme track is required"),
-    instructor_id: objectIdSchema.optional(),
-    status: z.enum(["draft", "published"]).optional(),
+    /**
+     * The course modals send this as `thumbnail_url`, and a picked file
+     * arrives as a base64 data URI, which is why the cap is generous here
+     * and not the 500 characters a hosted URL needs. The service stores
+     * whichever of the two arrived.
+     */
+    thumbnail_url: z.string().trim().max(2_000_000).nullish(),
+    /**
+     * Required — `Course.programme_track` is a required enum, so making this
+     * optional would only move the failure from Zod to Mongoose, where the
+     * message is worse. Preprocessed so an untouched `<select>` sending `""`
+     * produces "A programme track is required" rather than a type error.
+     */
+    programme_track: z.preprocess(
+      (value) => (value === "" || value === null ? undefined : value),
+      z
+        .string({ error: "A programme track is required" })
+        .trim()
+        .min(1, "A programme track is required")
+    ),
+    instructor_id: blank(objectIdSchema),
+    // Looked up by the modal from the instructor_id it is already sending,
+    // for its own optimistic update. The server reads the id.
+    instructor_name: ignored,
+    status: blank(z.enum(["draft", "published"])),
     price: z.coerce.number().min(0).optional(),
     price_kobo: z.coerce.number().int().min(0).optional(),
-    payment_type: z.enum(["subscription", "one_time"]).optional(),
+    payment_type: blank(z.enum(["subscription", "one_time"])),
   })
   .strict();
 
@@ -328,7 +415,7 @@ const quizQuestion = z.object({
 export const createQuizBody = z
   .object({
     module_id: objectIdSchema,
-    lesson_id: objectIdSchema.nullish(),
+    lesson_id: blank(objectIdSchema),
     title: courseTitle,
     order_index: z.coerce.number().int().min(1).optional(),
     questions: z.array(quizQuestion).max(50).optional(),
@@ -351,9 +438,29 @@ export const submitQuizBody = z
 export const createAssignmentBody = z
   .object({
     module_id: objectIdSchema,
+    course_id: blank(objectIdSchema),
     title: courseTitle,
     instructions: z.string().trim().max(4000).optional(),
     deadline: z.string().trim().max(40).nullish(),
+    /**
+     * How the work is handed in and marked.
+     *
+     * All five are collected by the Add Assignment modal and none was in the
+     * schema, so every assignment an instructor created was refused. They
+     * are stored rather than ignored: an instructor who sets a 50-point
+     * assignment and a 10% late penalty has said something about how the
+     * work is marked, and quietly keeping the defaults would be worse than
+     * the 400 was.
+     */
+    submission_types: z
+      .array(z.enum(["text", "link", "file"]))
+      .min(1, "Pick at least one way to submit")
+      .max(3)
+      .optional(),
+    max_score: z.coerce.number().int().min(1).max(1000).optional(),
+    grade_type: z.enum(["letter", "percentage", "pass_fail"]).optional(),
+    allow_late: z.coerce.boolean().optional(),
+    late_penalty: blank(z.coerce.number().min(0).max(100)),
   })
   .strict();
 
@@ -413,10 +520,15 @@ export const createSessionBody = z
     scheduled_at: z.string({ error: "A date and time is required" }).trim().min(1),
     duration_minutes: z.coerce.number().int().min(5).max(480).optional(),
     session_number: z.coerce.number().int().min(1).nullish(),
-    mode: z.enum(["online", "physical", "hybrid"]).optional(),
+    mode: blank(z.enum(["online", "physical", "hybrid"])),
     meeting_url: z.string().trim().max(500).nullish(),
+    // What the session form calls the meeting link. The service takes
+    // whichever arrived.
+    join_url: z.string().trim().max(500).nullish(),
     venue: z.string().trim().max(200).nullish(),
     max_students: z.coerce.number().int().min(1).max(500).nullish(),
+    /** Whether learners can see it yet; the form has a toggle for it. */
+    is_published: z.coerce.boolean().optional(),
   })
   .strict();
 

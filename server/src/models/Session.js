@@ -45,6 +45,16 @@ const sessionSchema = new mongoose.Schema({
   venue: { type: String, default: null },
   max_students: { type: Number, default: null },
 
+  /**
+   * Whether learners can see this session yet.
+   *
+   * Distinct from `status`, which is computed from the clock (ADR-023) and
+   * answers "is it happening now?". This answers "has the instructor
+   * finished drafting it?", and the session form has a toggle for it that
+   * the API previously rejected.
+   */
+  is_published: { type: Boolean, default: true },
+
   status: {
     type: String,
     enum: ["scheduled", "cancelled"],

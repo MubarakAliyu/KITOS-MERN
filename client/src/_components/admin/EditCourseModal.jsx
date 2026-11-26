@@ -9,14 +9,18 @@ import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { updateCourse } from "@/_lib/api/admin";
 import { ThumbnailField } from "@/_components/admin/CreateCourseModal";
+import { apiErrorMessage } from "@/_lib/api/errors";
 
 const PAYMENT_TYPES = ["subscription", "one_time"];
+/** The three programme tracks (PRD §3.1), as the API labels them. */
+const TRACKS = ["Scratch Programming", "Web Development", "Robotics Basics"];
 
 const schema = z.object({
   title: z.string().trim().min(2, "Title is required"),
   description: z.string().trim().min(10, "Add a brief description"),
   price: z.coerce.number().min(0, "Price must be ≥ 0"),
   payment_type: z.enum(PAYMENT_TYPES, { message: "Pick a payment type" }),
+  programme_track: z.enum(TRACKS, { message: "Pick a programme track" }),
   instructor_id: z.string().trim().min(1, "Pick an instructor"),
 });
 
@@ -45,6 +49,7 @@ export default function EditCourseModal({
       description: course.description ?? "",
       price: course.price ?? 0,
       payment_type: course.payment_type ?? "subscription",
+      programme_track: course.programme_track ?? "",
       instructor_id: course.instructor_id ?? "",
     });
     setThumbnailPreview(course.thumbnail_url ?? null);
@@ -84,8 +89,8 @@ export default function EditCourseModal({
         thumbnail_url: thumbnailPreview,
       });
       onClose?.();
-    } catch {
-      toast.error("Couldn't update course");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Couldn't update course"));
     }
   }
 
@@ -182,6 +187,31 @@ export default function EditCourseModal({
                 >
                   <option value="subscription">Subscription</option>
                   <option value="one_time">One-time</option>
+                </select>
+              </Field>
+
+              {/*
+                The API has always required a track and the modal never asked
+                for it, so an edit that touched anything else dropped it.
+              */}
+              <Field
+                id="ec-track"
+                label="Programme Track"
+                error={errors.programme_track?.message}
+              >
+                <select
+                  id="ec-track"
+                  {...register("programme_track")}
+                  className={inputClass(errors.programme_track)}
+                >
+                  <option value="" disabled>
+                    Select a track…
+                  </option>
+                  {TRACKS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
                 </select>
               </Field>
 

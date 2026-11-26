@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { assignInstructor } from "@/_lib/api/admin";
+import { apiErrorMessage } from "@/_lib/api/errors";
 
 export default function AssignInstructorModal({
   isOpen,
@@ -41,8 +42,8 @@ export default function AssignInstructorModal({
       toast.success("Instructor assigned");
       onAssigned?.(user?.id, courseId);
       onClose?.();
-    } catch {
-      toast.error("Couldn't assign instructor");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Couldn't assign instructor"));
     } finally {
       setSubmitting(false);
     }

@@ -442,7 +442,9 @@ export async function createCourse({ user, payload }) {
   const course = await Course.create({
     title: toPlainText(payload.title, 160),
     description: toPlainText(payload.description ?? "", 2000),
-    thumbnail: payload.thumbnail ?? null,
+    // The course modals send `thumbnail_url`; the model calls it
+    // `thumbnail`. Take whichever arrived.
+    thumbnail: payload.thumbnail ?? payload.thumbnail_url ?? null,
     instructor_id: instructorId,
     programme_track: track,
     status: payload.status ?? "draft",
@@ -464,6 +466,9 @@ export async function updateCourse({ user, courseId, payload }) {
     course.description = toPlainText(payload.description, 2000);
   }
   if (payload.thumbnail !== undefined) course.thumbnail = payload.thumbnail;
+  else if (payload.thumbnail_url !== undefined) {
+    course.thumbnail = payload.thumbnail_url;
+  }
   if (payload.payment_type !== undefined) course.payment_type = payload.payment_type;
   if (payload.price_kobo !== undefined) course.price_kobo = payload.price_kobo;
   else if (payload.price !== undefined) course.price_kobo = nairaToKobo(payload.price);

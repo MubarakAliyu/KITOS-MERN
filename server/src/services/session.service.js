@@ -275,8 +275,32 @@ export async function createSession({ user, payload }) {
     });
   }
 
-  const mode = payload.mode ?? "online";
-  if ((mode === "online" || mode === "hybrid") && !payload.meeting_url) {
+  /**
+   * The session form calls the meeting link `join_url`; the model calls it
+   * `meeting_url`. Take whichever arrived.
+   */
+  const meetingUrl = payload.meeting_url ?? payload.join_url ?? null;
+
+  /**
+   * Require a link only when the caller actually said the class is online.
+   *
+   * The retained session form has no mode control and lets the link be left
+   * blank — an instructor books the slot now and pastes the Meet link later,
+   * which is how a bootcamp timetable is really filled in. The old rule
+   * defaulted the mode to "online" and then refused anything without a link,
+   * so every session created from that form was a 400 over a field the form
+   * presented as optional.
+   *
+   * With no mode given, it is inferred from what was supplied rather than
+   * assumed: a link means online, a venue means physical, neither means
+   * online with the link still to come. The rule still bites when someone
+   * explicitly says "online" and gives no way in, which is the case worth
+   * catching — a pupil cannot attend a class with no link and no room.
+   */
+  const mode =
+    payload.mode ?? (meetingUrl ? "online" : payload.venue ? "physical" : "online");
+
+  if (payload.mode && (mode === "online" || mode === "hybrid") && !meetingUrl) {
     throw badRequest("Validation failed", undefined, {
       meeting_url: "An online session needs a meeting link",
     });
@@ -298,9 +322,10 @@ export async function createSession({ user, payload }) {
     duration_minutes: payload.duration_minutes ?? 60,
     session_number: payload.session_number ?? null,
     mode,
-    meeting_url: payload.meeting_url ?? null,
+    meeting_url: meetingUrl,
     venue: payload.venue ?? null,
     max_students: payload.max_students ?? null,
+    is_published: payload.is_published ?? true,
   });
 
   await notifyCourse(session, {

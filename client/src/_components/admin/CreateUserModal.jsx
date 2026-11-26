@@ -7,7 +7,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AlertCircle, Hash, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import { createUser, getNextAdmissionNo, updateUser } from "@/_lib/api/admin";
+import { createUser, getAdminUsers, getNextAdmissionNo, updateUser } from "@/_lib/api/admin";
+import { apiErrorMessage, apiFieldErrors } from "@/_lib/api/errors";
 
 const ROLES = ["admin", "instructor", "student", "parent"];
 const TRACKS = ["Scratch Programming", "Web Development", "Robotics Basics"];
@@ -21,6 +22,11 @@ const schema = z
     role: z.enum(ROLES, { message: "Pick a role" }),
     age: z.coerce.number().optional().or(z.literal(NaN)),
     programme_track: z.string().optional(),
+    // A pupil belongs to a family. The API has always required this; the
+    // modal never asked for it, so creating a pupil was impossible from
+    // here — the request died on `parent_id` after passing every check the
+    // form itself made.
+    parent_id: z.string().optional(),
     bio: z.string().max(200).optional(),
   })
   .superRefine((data, ctx) => {
@@ -43,6 +49,13 @@ const schema = z
           message: "Enter a valid email (or leave blank)",
         });
       }
+    }
+    if (data.role === "student" && !data.parent_id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["parent_id"],
+        message: "Pick the parent this pupil belongs to",
+      });
     }
     if (data.role === "student") {
       if (!data.age || Number.isNaN(data.age) || data.age < 5 || data.age > 18) {
@@ -75,6 +88,7 @@ export default function CreateUserModal({
     handleSubmit,
     reset,
     watch,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schema),
@@ -84,6 +98,7 @@ export default function CreateUserModal({
       role: "student",
       age: "",
       programme_track: "",
+      parent_id: "",
       bio: "",
     },
   });
@@ -91,6 +106,7 @@ export default function CreateUserModal({
   const role = watch("role");
   const [nextAdmissionNo, setNextAdmissionNo] = useState(null);
   const [admissionLoading, setAdmissionLoading] = useState(false);
+  const [parents, setParents] = useState([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -101,6 +117,7 @@ export default function CreateUserModal({
         role: userToEdit.role ?? "student",
         age: userToEdit.age ?? "",
         programme_track: userToEdit.programme_track ?? "",
+        parent_id: userToEdit.parent_id ?? "",
         bio: userToEdit.bio ?? "",
       });
     } else {
@@ -110,6 +127,7 @@ export default function CreateUserModal({
         role: defaultValues?.role ?? "student",
         age: defaultValues?.age ?? "",
         programme_track: defaultValues?.programme_track ?? "",
+        parent_id: defaultValues?.parent_id ?? "",
         bio: "",
       });
     }
@@ -119,6 +137,23 @@ export default function CreateUserModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [isOpen, onClose, reset, defaultValues, userToEdit]);
+
+  // The families a pupil can be attached to. Loaded with the admission
+  // number, for the same reason: only a pupil needs either.
+  useEffect(() => {
+    if (!isOpen || role !== "student") return;
+    let cancelled = false;
+    getAdminUsers()
+      .then((rows) => {
+        if (cancelled) return;
+        const list = Array.isArray(rows) ? rows : rows?.users ?? [];
+        setParents(list.filter((u) => u.role === "parent"));
+      })
+      .catch((err) => console.warn("Parent list fetch failed:", err?.message));
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, role]);
 
   // Fetch the next admission number whenever the modal opens for a student
   // (or the role flips to student mid-flow). Other roles never need it.
@@ -141,14 +176,42 @@ export default function CreateUserModal({
     };
   }, [isOpen, role]);
 
+  /**
+   * Only the fields that mean something for the chosen role.
+   *
+   * The form keeps every field in its state whether or not it is on screen,
+   * so an instructor used to be submitted with `age: 0` and
+   * `programme_track: ""` — values nobody typed, for inputs the modal hides
+   * for that role. The API rejected the age as outside 8 to 18, which it is,
+   * and the error named a field the admin could not even see.
+   */
+  function payloadFor(values) {
+    const isStudent = values.role === "student";
+    return {
+      name: values.name,
+      role: values.role,
+      // A pupil signs in with an admission number and need not have an
+      // address at all; blank means absent, not empty.
+      email: values.email?.trim() ? values.email.trim() : null,
+      bio: values.bio?.trim() ? values.bio.trim() : null,
+      ...(isStudent
+        ? {
+            age: values.age,
+            programme_track: values.programme_track,
+            // Only when creating. Moving a child to a different family is a
+            // custody decision, not something that should happen as a side
+            // effect of correcting a spelling — and the update endpoint
+            // rightly does not accept it.
+            ...(userToEdit ? {} : { parent_id: values.parent_id }),
+          }
+        : {}),
+    };
+  }
+
   async function onSubmit(values) {
     try {
-      // Strip the empty-email sentinel for students so the API sees null.
-      const payload = {
-        ...values,
-        email: values.email?.length ? values.email : null,
-      };
-      
+      const payload = payloadFor(values);
+
       if (userToEdit) {
         const updated = await updateUser(userToEdit.id, payload);
         toast.success("User updated successfully");
@@ -161,12 +224,43 @@ export default function CreateUserModal({
         const idLine = created.admission_no
           ? `Admission No: ${created.admission_no}`
           : created.email;
-        toast.success(`User created! ${idLine}`);
+
+        /**
+         * The temporary password is shown once, here, and never again — it
+         * is not stored anywhere this screen can read back. So it is a toast
+         * that stays until dismissed rather than one that slides away after
+         * four seconds, and it says how else it reached them.
+         */
+        if (created.temporary_password) {
+          toast.success(`User created \u2014 ${idLine}`, {
+            description:
+              `Temporary password: ${created.temporary_password}. ` +
+              (created.email
+                ? "It has also been emailed to them. "
+                : "There is no email address on this account, so pass it on yourself. ") +
+              "It is shown only once and must be changed at first sign-in.",
+            duration: Infinity,
+            closeButton: true,
+          });
+        } else {
+          toast.success(`User created! ${idLine}`);
+        }
         onCreated?.(created);
       }
       onClose?.();
-    } catch {
-      toast.error(userToEdit ? "Couldn't update user" : "Couldn't create user");
+    } catch (error) {
+      // The server's own field messages, on the inputs and in the toast.
+      // "Couldn't create user" was all anyone saw while every admin write in
+      // production was failing validation.
+      for (const [field, message] of Object.entries(apiFieldErrors(error))) {
+        setError(field, { type: "server", message });
+      }
+      toast.error(
+        apiErrorMessage(
+          error,
+          userToEdit ? "Couldn't update user" : "Couldn't create user"
+        )
+      );
     }
   }
 
@@ -211,9 +305,14 @@ export default function CreateUserModal({
               noValidate
               className="flex flex-col gap-4 overflow-y-auto px-5 py-5"
             >
-              {/* Default-password info box — replaces explicit password
-                  inputs. POST /admin/users assigns "default1234" and forces a
-                  reset on first login. */}
+              {/*
+                Every new account used to be given the same password,
+                "default1234", which is printed in this repository's README
+                and its handoff document. Anyone who could reach the sign-in
+                page and guess an admission number could sign in as a child.
+                The API now generates a different random password for each
+                account and returns it once, here.
+              */}
               {!userToEdit && (
                 <div className="flex gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
                   <AlertCircle
@@ -222,16 +321,16 @@ export default function CreateUserModal({
                   />
                   <div>
                     <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
-                      Default Password Assigned
+                      A temporary password will be generated
                     </p>
                     <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                      New user will be assigned the default password:{" "}
-                      <code className="ml-1 rounded bg-[var(--bg-secondary)] px-1.5 py-0.5 font-mono text-xs">
-                        default1234
-                      </code>
+                      It is shown to you <strong>once</strong>, when the
+                      account is created, and emailed to them if this account
+                      has an email address. Write it down before closing the
+                      message — it cannot be shown again.
                     </p>
                     <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                      They will be prompted to reset it on first login.
+                      They must change it the first time they sign in.
                     </p>
                   </div>
                 </div>
@@ -327,6 +426,36 @@ export default function CreateUserModal({
                       {TRACKS.map((t) => (
                         <option key={t} value={t}>
                           {t}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {/*
+                    A pupil belongs to a family, and the API has always
+                    required it. The modal never asked, so every attempt to
+                    create a pupil from this screen failed on `parent_id`
+                    after passing every check the form itself made.
+                  */}
+                  <Field
+                    id="cu-parent"
+                    label="Parent"
+                    error={errors.parent_id?.message}
+                  >
+                    <select
+                      id="cu-parent"
+                      defaultValue=""
+                      {...register("parent_id")}
+                      className={inputClass(errors.parent_id)}
+                    >
+                      <option value="" disabled>
+                        {parents.length === 0
+                          ? "No parent accounts yet — create one first"
+                          : "Select a parent…"}
+                      </option>
+                      {parents.map((parent) => (
+                        <option key={parent.id} value={parent.id}>
+                          {parent.name}
+                          {parent.email ? ` · ${parent.email}` : ""}
                         </option>
                       ))}
                     </select>

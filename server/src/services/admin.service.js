@@ -10,7 +10,11 @@ import {
 } from "../lib/numbering.js";
 import { generateTempPassword } from "../lib/tokens.js";
 import { logActivity } from "../lib/audit.js";
-import { sendMail, childAccountEmail } from "../lib/mailer.js";
+import {
+  sendMail,
+  accountCreatedEmail,
+  childAccountEmail,
+} from "../lib/mailer.js";
 import { searchRegex, toSkipLimit } from "../lib/pagination.js";
 import { badRequest, notFound, conflict } from "../lib/errors.js";
 import { toTrackSlug, toTrackLabel } from "../config/constants.js";
@@ -157,6 +161,9 @@ export async function createUser(input, actor, ip) {
     admission_no: admissionNo,
     password_hash: passwordHash,
     language_preference: input.language_preference ?? "en",
+    // A profile note the Add User modal collects. The field has always
+    // existed on the model; nothing ever wrote to it.
+    bio: input.bio ?? undefined,
     must_reset_password: true,
     is_active: true,
   });
@@ -201,6 +208,25 @@ export async function createUser(input, actor, ip) {
     });
   }
 
+  /**
+   * An account with its own address is told its own password.
+   *
+   * Only a child's parent was ever emailed, so a new instructor or parent
+   * had to be read their temporary password out loud from the toast. The
+   * password is still returned once in the response — the email is a second
+   * copy, not a replacement, because mail can bounce and the administrator
+   * is standing there now.
+   */
+  if (user.email) {
+    const message = accountCreatedEmail({
+      name: user.name,
+      role,
+      identifier: user.email,
+      tempPassword,
+    });
+    await sendMail({ to: user.email, ...message });
+  }
+
   await logActivity({
     actor,
     action: "created_user",
@@ -223,6 +249,10 @@ export async function createUser(input, actor, ip) {
     ),
     // Shown once so the administrator can pass it on. Not stored, not logged.
     password: tempPassword,
+    // The same value under the name the Add User modal reads. Both are
+    // returned rather than renaming one, because `password` is the key
+    // docs/API.md has always documented and something may depend on it.
+    temporary_password: tempPassword,
   };
 }
 
@@ -247,6 +277,11 @@ export async function updateUser(id, patch, actor, ip) {
   if (patch.name !== undefined && patch.name !== user.name) {
     user.name = patch.name;
     changed.push("name");
+  }
+
+  if (patch.bio !== undefined && patch.bio !== user.bio) {
+    user.bio = patch.bio ?? "";
+    changed.push("bio");
   }
 
   if (patch.email !== undefined) {

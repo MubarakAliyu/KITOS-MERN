@@ -23,6 +23,7 @@ import { createAssignment } from "@/_lib/api/instructor";
 import { getInstructorCourses } from "@/_lib/api/instructor";
 import { getCourseModules } from "@/_lib/api/courses";
 import RichLessonEditor from "@/_components/editor/RichLessonEditor";
+import { apiErrorMessage } from "@/_lib/api/errors";
 
 const SUBMISSION_TYPES = [
   {
@@ -240,8 +241,8 @@ export default function AddAssignmentModal({
       onCreated?.(created);
       onSuccess?.(created);
       onClose?.();
-    } catch {
-      toast.error("Couldn't create assignment");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Couldn't create assignment"));
     }
   }
 

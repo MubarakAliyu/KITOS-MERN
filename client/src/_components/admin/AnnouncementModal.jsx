@@ -6,6 +6,7 @@ import { Bell, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { sendAnnouncement } from "@/_lib/api/admin";
 import { useLiveNotify } from "@/_lib/notifications/liveNotify";
+import { apiErrorMessage } from "@/_lib/api/errors";
 
 const TARGETS = [
   { key: "all", label: "All Users", count: 7 },
@@ -72,8 +73,8 @@ export default function AnnouncementModal({ isOpen, onClose, courses }) {
       const count = res?.sent_count ?? audienceCount;
       notify("announcement_sent", { count });
       onClose?.();
-    } catch {
-      toast.error("Couldn't send announcement");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Couldn't send announcement"));
     } finally {
       setSubmitting(false);
     }

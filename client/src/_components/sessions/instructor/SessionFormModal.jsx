@@ -9,6 +9,7 @@ import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { createSession, updateSession } from "@/_lib/api/sessions";
 import { getInstructorCourses } from "@/_lib/api/instructor";
+import { apiErrorMessage } from "@/_lib/api/errors";
 
 
 const DURATIONS = [30, 45, 60, 90, 120];
@@ -154,8 +155,8 @@ export default function SessionFormModal({ isOpen, onClose, session, onSaved }) 
       toast.success(isEdit ? "Session updated" : "Session created");
       onSaved?.(saved);
       onClose?.();
-    } catch {
-      toast.error(isEdit ? "Couldn't update session" : "Couldn't create session");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, isEdit ? "Couldn't update session" : "Couldn't create session"));
     }
   }
 

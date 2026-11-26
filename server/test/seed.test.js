@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resetState } from "./helpers.js";
 import { runSeed, isRemoteDatabase } from "../src/seed/seed.js";
+import mongoose from "mongoose";
 import { resetEnvCache } from "../src/config/env.js";
 import { PAYMENTS, SUBSCRIPTIONS } from "../src/seed/courses.js";
 import { Payment } from "../src/models/Payment.js";
 import { Subscription } from "../src/models/Subscription.js";
 import { User } from "../src/models/User.js";
+import { Student } from "../src/models/Student.js";
 import { Course } from "../src/models/Course.js";
 import { Enrollment } from "../src/models/Enrollment.js";
 
@@ -232,5 +234,134 @@ describe("refusing to seed a remote database by accident", () => {
     ])("%s -> remote: %s", (uri, expected) => {
       expect(isRemoteDatabase(uri)).toBe(expected);
     });
+  });
+});
+
+/**
+ * `SEED_MODE=minimal` — an empty platform with four accounts.
+ *
+ * For a real deployment the school fills itself. The full seed's fixtures
+ * are a demonstration: courses nobody teaches, payments nobody made, a chat
+ * transcript between people who do not exist. Useful for a walkthrough,
+ * wrong on a live site.
+ */
+describe("the minimal seed", () => {
+  const realMode = process.env.SEED_MODE;
+
+  beforeEach(() => {
+    process.env.SEED_MODE = "minimal";
+  });
+
+  afterEach(() => {
+    if (realMode === undefined) delete process.env.SEED_MODE;
+    else process.env.SEED_MODE = realMode;
+  });
+
+  it("creates exactly four accounts and nothing else", async () => {
+    const summary = await runSeed({ quiet: true });
+
+    expect(summary.mode).toBe("minimal");
+    expect(await User.countDocuments({ role: "admin" })).toBe(1);
+    expect(await User.countDocuments({ role: "instructor" })).toBe(1);
+    expect(await User.countDocuments({ role: "parent" })).toBe(1);
+    expect(await User.countDocuments({ role: "student" })).toBe(1);
+    expect(await User.countDocuments({})).toBe(4);
+  });
+
+  it("links the pupil to the parent, with consent on record", async () => {
+    await runSeed({ quiet: true });
+
+    const parent = await User.findOne({ role: "parent" });
+    const student = await Student.findOne({});
+
+    expect(String(student.parent_id)).toBe(String(parent._id));
+    // Active with no consent row behind it would be a child-safety gap
+    // dressed up as convenience (PRD §10).
+    expect(student.status).toBe("active");
+    expect(student.consent_id).toBeTruthy();
+  });
+
+  it("numbers the pupil KIT/<year>/001 and leaves 002 next", async () => {
+    const summary = await runSeed({ quiet: true });
+
+    expect(summary.firstAdmission).toMatch(/^KIT\/\d{2}\/001$/);
+
+    const { nextAdmissionNumber } = await import("../src/lib/numbering.js");
+    expect(await nextAdmissionNumber()).toBe(
+      summary.firstAdmission.replace(/001$/, "002")
+    );
+  });
+
+  it("leaves the content and money collections empty", async () => {
+    await runSeed({ quiet: true });
+
+    const empty = [Course, Payment, Subscription];
+    for (const Model of empty) {
+      expect(await Model.countDocuments({})).toBe(0);
+    }
+  });
+
+  /**
+   * Named one by one rather than looped, so adding a collection to the
+   * project without clearing it here is a failure rather than an omission
+   * nobody notices.
+   */
+  it("wipes every collection, not only the ones it writes", async () => {
+    // Seed the full fixture set first, so there is plenty to wipe.
+    delete process.env.SEED_MODE;
+    await runSeed({ quiet: true });
+    expect(await Payment.countDocuments({})).toBeGreaterThan(0);
+
+    process.env.SEED_MODE = "minimal";
+    await runSeed({ quiet: true });
+
+    const db = mongoose.connection.db;
+    const collections = await db.listCollections().toArray();
+    const counts = {};
+    for (const { name } of collections) {
+      counts[name] = await db.collection(name).countDocuments();
+    }
+
+    // Only what a fresh platform needs: four users, one pupil profile, one
+    // consent, one settings row, one counter and the seed's own audit line.
+    const nonEmpty = Object.entries(counts).filter(([, n]) => n > 0);
+    expect(Object.fromEntries(nonEmpty)).toEqual({
+      users: 4,
+      students: 1,
+      consents: 1,
+      settings: 1,
+      counters: 1,
+      activity_logs: 1,
+    });
+  });
+
+  it("writes the platform settings row the UI reads", async () => {
+    await runSeed({ quiet: true });
+
+    const { Setting } = await import("../src/models/Setting.js");
+    const settings = await Setting.findOne({ key: "platform" });
+    expect(settings).toBeTruthy();
+    expect(settings.platform_name).toBeTruthy();
+  });
+
+  /** The guard is not relaxed for the mode most likely to meet a real database. */
+  it("still refuses a remote database without NODE_ENV=production", async () => {
+    const realUri = process.env.MONGODB_URI;
+    process.env.MONGODB_URI = "mongodb+srv://user:pw@cluster0.abc.mongodb.net/";
+    resetEnvCache();
+
+    await expect(runSeed({ quiet: true })).rejects.toThrow(
+      /refusing to seed a remote database/i
+    );
+
+    process.env.MONGODB_URI = realUri;
+    resetEnvCache();
+  });
+
+  it("can be run twice", async () => {
+    await runSeed({ quiet: true });
+    await runSeed({ quiet: true });
+
+    expect(await User.countDocuments({})).toBe(4);
   });
 });

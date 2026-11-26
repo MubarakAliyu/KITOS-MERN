@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { createQuiz } from "@/_lib/api/instructor";
+import { apiErrorMessage } from "@/_lib/api/errors";
 
 const LETTERS = ["A", "B", "C", "D"];
 
@@ -97,8 +98,8 @@ export default function AddQuizModal({
       toast.success("Quiz created");
       onCreated?.(created);
       onClose?.();
-    } catch {
-      toast.error("Couldn't create quiz");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Couldn't create quiz"));
     } finally {
       setSubmitting(false);
     }

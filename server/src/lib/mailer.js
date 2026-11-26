@@ -116,6 +116,35 @@ export function passwordResetEmail({ name, token }) {
 }
 
 /**
+ * Sent to a new account holder who has their own email address — staff,
+ * parents, and the occasional pupil who has one.
+ *
+ * A child's details go to their parent instead (`childAccountEmail`), which
+ * is why this is a separate template rather than a branch inside that one:
+ * the two have different recipients and different things to say about who
+ * may keep the password.
+ */
+export function accountCreatedEmail({ name, role, identifier, tempPassword }) {
+  return {
+    subject: "Your Kids In Tech account",
+    text: [
+      `Hello ${name || "there"},`,
+      "",
+      `An account has been created for you on Kids In Tech as a ${role}.`,
+      "",
+      `Sign in with: ${identifier}`,
+      `Temporary password: ${tempPassword}`,
+      "",
+      "You will be asked to choose your own password the first time you sign in.",
+      "",
+      `Sign in at ${env.CLIENT_ORIGIN}/login`,
+      "",
+      "Kids In Tech",
+    ].join("\n"),
+  };
+}
+
+/**
  * Sent to the parent when a child's login is provisioned. Carries the
  * admission number and the one-time password the child must change on first
  * sign-in.

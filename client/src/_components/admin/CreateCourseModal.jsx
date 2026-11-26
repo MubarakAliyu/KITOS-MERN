@@ -9,14 +9,18 @@ import { Loader2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { createCourse } from "@/_lib/api/admin";
 import CourseThumbnail from "@/_components/ui/CourseThumbnail";
+import { apiErrorMessage } from "@/_lib/api/errors";
 
 const PAYMENT_TYPES = ["subscription", "one_time"];
+/** The three programme tracks (PRD §3.1), as the API labels them. */
+const TRACKS = ["Scratch Programming", "Web Development", "Robotics Basics"];
 
 const schema = z.object({
   title: z.string().trim().min(2, "Title is required"),
   description: z.string().trim().min(10, "Add a brief description"),
   price: z.coerce.number().min(0, "Price must be ≥ 0"),
   payment_type: z.enum(PAYMENT_TYPES, { message: "Pick a payment type" }),
+  programme_track: z.enum(TRACKS, { message: "Pick a programme track" }),
   instructor_id: z.string().trim().min(1, "Pick an instructor"),
 });
 
@@ -39,6 +43,7 @@ export default function CreateCourseModal({
       description: "",
       price: 0,
       payment_type: "subscription",
+      programme_track: "",
       instructor_id: "",
     },
   });
@@ -89,8 +94,8 @@ export default function CreateCourseModal({
       toast.success("Course created! Draft saved.");
       onCreated?.(created);
       onClose?.();
-    } catch {
-      toast.error("Couldn't create course");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Couldn't create course"));
     }
   }
 
@@ -188,6 +193,33 @@ export default function CreateCourseModal({
                 >
                   <option value="subscription">Subscription</option>
                   <option value="one_time">One-time</option>
+                </select>
+              </Field>
+
+              {/*
+                The API has always required a track — `Course.programme_track`
+                is a required enum, and it is what puts a course on the
+                Scratch → Web/Robotics → Advanced path. The modal never asked
+                for it, so every course created from this screen was a 400.
+              */}
+              <Field
+                id="cc-track"
+                label="Programme Track"
+                error={errors.programme_track?.message}
+              >
+                <select
+                  id="cc-track"
+                  {...register("programme_track")}
+                  className={inputClass(errors.programme_track)}
+                >
+                  <option value="" disabled>
+                    Select a track…
+                  </option>
+                  {TRACKS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
                 </select>
               </Field>
 

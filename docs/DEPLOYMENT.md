@@ -265,6 +265,63 @@ DEMO_FAMILY_PASSWORD="<10+ characters>" \
 npm run seed
 ```
 
+### Starting empty instead — `SEED_MODE=minimal`
+
+The command above seeds the **demonstration** fixtures: three courses with
+lessons and quizzes, eight enrolments, payments, a chat transcript, a
+certificate. That is what a walkthrough needs and the wrong thing to put on a
+live site, where the school enters its own.
+
+`SEED_MODE=minimal` wipes **every** collection and creates only what an empty
+platform needs: the platform settings row, and one admin, one instructor, one
+parent, and that parent's one pupil as `KIT/<year>/001`. No courses, cohorts,
+enrolments, sessions, payments, certificates or conversations. The admission
+counter is wiped with everything else, so the next pupil you add is
+`KIT/<year>/002`.
+
+PowerShell:
+
+```powershell
+cd server
+$env:NODE_ENV = "production"
+$env:SEED_MODE = "minimal"
+$env:MONGODB_URI = "<the Atlas string>"
+$env:ALLOW_DEMO_SEED = "true"
+$env:DEMO_ADMIN_PASSWORD = "<10+ characters>"
+$env:DEMO_STAFF_PASSWORD = "<10+ characters>"
+$env:DEMO_FAMILY_PASSWORD = "<10+ characters>"
+npm run seed
+Remove-Item Env:NODE_ENV, Env:SEED_MODE, Env:MONGODB_URI, Env:ALLOW_DEMO_SEED, Env:DEMO_ADMIN_PASSWORD, Env:DEMO_STAFF_PASSWORD, Env:DEMO_FAMILY_PASSWORD
+```
+
+bash:
+
+```bash
+cd server
+NODE_ENV=production \
+SEED_MODE=minimal \
+MONGODB_URI="<the Atlas string>" \
+ALLOW_DEMO_SEED=true \
+DEMO_ADMIN_PASSWORD="<10+ characters>" \
+DEMO_STAFF_PASSWORD="<10+ characters>" \
+DEMO_FAMILY_PASSWORD="<10+ characters>" \
+npm run seed
+```
+
+It prints what it created and the next admission number. The four accounts
+are `admin@kidsintech.school`, `instructor@kidsintech.school`,
+`parent@kidsintech.school` and the pupil's admission number, with the
+passwords you supplied — the same `DEMO_*_PASSWORD` values, and the same
+guards. **This is the mode most likely to be pointed at a real database, so
+it is the last one that should skip them:** it refuses a remote host without
+`NODE_ENV=production` exactly as the full seed does.
+
+> **It deletes everything first.** That is the point of it, and it cannot be
+> undone. Run it when you mean to start the site from nothing.
+
+Anyone you add afterwards from Admin → Users gets a random temporary password,
+shown to you once and emailed to them if the account has an address.
+
 **Check the summary says `DEMO_*_PASSWORD environment variables`,** not `development defaults
 (client/src/HANDOFF.md)`. That line is the difference between a seeded demo and a public one. In
 production the credentials are written to a git-ignored file rather than printed, so they are not

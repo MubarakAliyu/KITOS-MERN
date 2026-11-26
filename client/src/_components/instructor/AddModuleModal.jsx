@@ -8,6 +8,7 @@ import { z } from "zod";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { createModule } from "@/_lib/api/instructor";
+import { apiErrorMessage } from "@/_lib/api/errors";
 
 const schema = z.object({
   title: z.string().trim().min(2, "Title must be at least 2 characters"),
@@ -46,8 +47,8 @@ export default function AddModuleModal({
       toast.success("Module created!");
       onCreated?.(created);
       onClose?.();
-    } catch {
-      toast.error("Couldn't create module");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Couldn't create module"));
     }
   }
 

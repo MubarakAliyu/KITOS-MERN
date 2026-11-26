@@ -21,6 +21,7 @@ import {
 import { toast } from "sonner";
 import { updateAssignment } from "@/_lib/api/instructor";
 import RichLessonEditor from "@/_components/editor/RichLessonEditor";
+import { apiErrorMessage } from "@/_lib/api/errors";
 
 const SUBMISSION_TYPES = [
   { key: "text", label: "Written Answer", description: "Type a response", icon: Pencil, disabled: false },
@@ -148,8 +149,8 @@ export default function EditAssignmentModal({
       toast.success("Assignment updated");
       onSuccess?.(updated);
       onClose?.();
-    } catch {
-      toast.error("Couldn't update assignment");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Couldn't update assignment"));
     }
   }
 
