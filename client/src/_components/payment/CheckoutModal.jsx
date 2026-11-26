@@ -25,7 +25,6 @@ import {
   openCheckout,
   publicKey,
 } from "@/_lib/payments/flutterwave";
-import { notifyAdmin } from "@/_lib/notifications/adminNotify";
 import { useLiveNotify } from "@/_lib/notifications/liveNotify";
 import { formatNaira } from "@/_lib/utils/formatters";
 import { useLanguage } from "@/_lib/i18n/LanguageContext";
@@ -199,11 +198,19 @@ export default function CheckoutModal({
       setCreatedPayment(verified.payment ?? null);
 
       toast.success(t("payments.paymentConfirmed"));
-      notifyAdmin("payment_made", {
-        parent_name: session?.user?.name ?? "Parent",
-        amount: selectedCourse.price,
-        course_title: selectedCourse.title,
-      });
+      /**
+       * No `notifyAdmin` here.
+       *
+       * It posted a second "Payment Received" into every administrator's
+       * feed, so each payment arrived twice. The server already notifies
+       * them from `applyConfirmation`, behind the atomic claim, which means
+       * exactly once however many times verify and the webhook race — and
+       * it does it for payments confirmed by webhook while nobody has this
+       * modal open, which a browser call could never cover.
+       *
+       * The live toast below stays: it is this tab's own feedback and is
+       * not persisted.
+       */
       notify("payment_received", {
         amount: selectedCourse.price,
         parent: session?.user?.name ?? "Parent",

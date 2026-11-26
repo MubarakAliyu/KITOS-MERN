@@ -939,3 +939,102 @@ describe("subscriptions", () => {
     expect(await Subscription.countDocuments({})).toBe(1);
   });
 });
+
+/**
+ * The three things a confirmed payment tells people (production fix).
+ *
+ * All three were reported from the live site after a real Flutterwave test
+ * payment went through: one payment showed two different receipt numbers,
+ * the receipt's "Reference" field showed a date, and every administrator
+ * was told about the payment twice.
+ */
+describe("what a confirmed payment reports", () => {
+  async function confirmedPayment() {
+    const { parent, student } = await makeFamily();
+    const course = await makeCourse();
+    const reference = await openPayment({ parent, student, course });
+    const res = await verify(parent, { reference });
+    expect(res.status).toBe(200);
+    return { parent, student, course, reference, payment: res.body.payment };
+  }
+
+  /**
+   * One payment, one number, and it comes from the counter.
+   *
+   * The receipt modal built its own from the row id —
+   * `RCP-6B082C1CC0C69406F5865C64` — while the notification quoted the real
+   * `RCP-202611-0002`. Both looked like receipt numbers and only one was.
+   * This holds the API's end: the sequential number is on the payment, on
+   * the receipt endpoint, and in the notification, and nothing else is.
+   */
+  it("gives one sequential receipt number, everywhere it appears", async () => {
+    const { parent, payment } = await confirmedPayment();
+
+    expect(payment.receipt_no).toMatch(/^RCP-\d{6}-\d{4}$/);
+
+    const receipt = await request(server)
+      .get(`/payments/${payment.id}/receipt`)
+      .set(auth(parent));
+    expect(receipt.status).toBe(200);
+    expect(receipt.body.receipt_no).toBe(payment.receipt_no);
+    expect(receipt.body.receipt_number).toBe(payment.receipt_no);
+
+    const note = await Notification.findOne({
+      user_id: parent._id,
+      type: "payment_success",
+    });
+    expect(note.message).toContain(payment.receipt_no);
+    // The row id must not be passed off as a receipt number anywhere.
+    expect(note.message).not.toContain(String(payment.id).toUpperCase());
+  });
+
+  /** The reference is the gateway's, and is not the date. */
+  it("carries the transaction reference and the date as separate fields", async () => {
+    const { parent, reference, payment } = await confirmedPayment();
+
+    const receipt = await request(server)
+      .get(`/payments/${payment.id}/receipt`)
+      .set(auth(parent));
+
+    expect(receipt.body.tx_ref).toBe(reference);
+    expect(receipt.body.tx_ref).toMatch(/^KIT-/);
+    expect(receipt.body.created_at).toBeTruthy();
+    expect(receipt.body.tx_ref).not.toBe(receipt.body.created_at);
+  });
+
+  /**
+   * Exactly one notification per administrator per payment.
+   *
+   * The server has always sent one, from `applyConfirmation` behind the
+   * atomic claim. The second came from the browser, which posted its own to
+   * `/admin/notifications/send` after a successful checkout — a habit from
+   * when there was no server to do it. This asserts the server's own
+   * guarantee, including when verify and the webhook both land.
+   */
+  it("tells each administrator once, even when verify and the webhook race", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const second = await makeUser({ role: "admin" });
+    const { parent, student } = await makeFamily();
+    const course = await makeCourse();
+    const reference = await openPayment({ parent, student, course });
+
+    const { handleWebhook } = await import("../src/services/payment.service.js");
+    await Promise.all([
+      verify(parent, { reference }),
+      handleWebhook({
+        event: { event: "charge.completed", data: { tx_ref: reference } },
+      }),
+    ]);
+
+    for (const who of [admin, second]) {
+      const notes = await Notification.find({
+        user_id: who._id,
+        type: "payment_success",
+      });
+      expect(
+        notes,
+        `${who.name} should hear about the payment exactly once`
+      ).toHaveLength(1);
+    }
+  });
+});

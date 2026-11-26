@@ -63,13 +63,29 @@ export default function ReceiptModal({ payment, isOpen, onClose }) {
             </header>
 
             <div className="flex flex-col gap-4 px-5 py-5">
+              {/*
+                The issued receipt number, not one built here.
+                `RCP-${payment.id.toUpperCase()}` looked like a receipt
+                number and was a database row id wearing a prefix, so one
+                payment had two: the notification quoted the real
+                `RCP-202611-0002` from the counter, and this modal showed
+                `RCP-6B082C1CC0C69406F5865C64`. A receipt a family keeps has
+                to carry the number the school's own books use.
+              */}
               <p className="text-sm font-bold text-[#10B981] font-mono-ui">
-                {t("payments.receiptNumber")}: RCP-{String(payment.id).toUpperCase()}
+                {t("payments.receiptNumber")}:{" "}
+                {payment.receipt_no ?? payment.receipt_number ?? "—"}
               </p>
 
               <div className="grid grid-cols-2 gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4">
+                {/*
+                  This box was labelled Reference and held the date. The
+                  reference is the gateway's transaction id, which is the
+                  thing to quote when chasing a payment, so each now has its
+                  own field with its own label.
+                */}
                 <KV
-                  label={t("payments.reference")}
+                  label={t("payments.date")}
                   value={format(new Date(payment.created_at), "MMM d, yyyy")}
                 />
                 <div>
@@ -114,7 +130,7 @@ export default function ReceiptModal({ payment, isOpen, onClose }) {
               </div>
 
               <p className="text-[11px] text-[var(--text-muted)] font-mono-ui">
-                {t("payments.reference")}: {payment.tx_ref}
+                {t("payments.reference")}: {payment.tx_ref ?? "—"}
               </p>
             </div>
 

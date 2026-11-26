@@ -346,6 +346,7 @@
     "student": "Student",
     "course": "Course",
     "amountPaid": "Amount Paid",
+    "date": "Date",
     "reference": "Reference",
     "receiptNumber": "Receipt Number",
     "paymentReceipt": "Payment Receipt",
