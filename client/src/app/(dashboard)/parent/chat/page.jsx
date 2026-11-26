@@ -25,9 +25,25 @@ export default function ParentChatPage() {
     emitTyping,
   } = useChat(userId);
 
-  // Parent has exactly one channel — the admin support team. Auto-select it
-  // on desktop the moment it loads so they don't see an awkward empty pane.
-  const supportConv = allConversations[0] ?? null;
+  /**
+   * A parent has their own conversations, and their children's.
+   *
+   * This page used to take `allConversations[0]` and call it "the admin
+   * support team", on the assumption that a parent has exactly one channel.
+   * They do not: the API also returns every conversation their child is in,
+   * marked `observing`, because watching them is a safeguarding
+   * requirement (PRD §10).
+   *
+   * Two things went wrong because of that. The child's threads were never
+   * shown at all, so the oversight the product promises was unreachable.
+   * And the order of the list is not guaranteed, so when an observed thread
+   * came first the parent was dropped into their child's conversation
+   * labelled as their own support channel — they replied, and the API
+   * refused it with a 403 that surfaced as "Failed to send · Retry".
+   */
+  const ownConversations = allConversations.filter((c) => !c.observing);
+  const observedConversations = allConversations.filter((c) => c.observing);
+  const supportConv = ownConversations[0] ?? null;
   const [showChat, setShowChat] = useState(false);
 
   useEffect(() => {
@@ -78,19 +94,69 @@ export default function ParentChatPage() {
           </p>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
           {loading ? (
             <div className="skeleton-shimmer h-32 rounded-2xl" />
-          ) : supportConv ? (
-            <SupportCard
-              conversation={supportConv}
-              active={supportConv.id === activeConvId}
-              onClick={handleStartChat}
-            />
           ) : (
-            <div className="rounded-2xl border border-dashed border-[var(--border-color)] p-6 text-center text-sm text-[var(--text-secondary)]">
-              Support is currently unavailable.
-            </div>
+            <>
+              {supportConv ? (
+                <SupportCard
+                  conversation={supportConv}
+                  active={supportConv.id === activeConvId}
+                  onClick={handleStartChat}
+                />
+              ) : (
+                <div className="rounded-2xl border border-dashed border-[var(--border-color)] p-6 text-center text-sm text-[var(--text-secondary)]">
+                  Support is currently unavailable.
+                </div>
+              )}
+
+              {/*
+                The child's conversations, which the parent may read and not
+                write in. Kept in their own group and labelled, so nobody
+                mistakes one for a thread of their own — which is how a
+                reply ended up being attempted, and refused, in the first
+                place.
+              */}
+              {observedConversations.length > 0 && (
+                <section className="flex flex-col gap-2">
+                  <h2 className="px-1 text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] font-mono-ui">
+                    Your children&apos;s conversations
+                  </h2>
+                  <p className="px-1 text-xs text-[var(--text-secondary)]">
+                    You can read these. Only your child can reply.
+                  </p>
+                  {observedConversations.map((conversation) => (
+                    <button
+                      key={conversation.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveConvId(conversation.id);
+                        setShowChat(true);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
+                        conversation.id === activeConvId
+                          ? "border-[#10B981] bg-[#10B981]/5"
+                          : "border-[var(--border-color)] hover:border-[var(--text-muted)]"
+                      }`}
+                    >
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--bg-secondary)] text-xs font-bold text-[var(--text-secondary)]">
+                        {conversation.participant_initial}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-bold text-[var(--text-primary)]">
+                          {conversation.child_name ?? "Your child"} &amp;{" "}
+                          {conversation.participant_name}
+                        </span>
+                        <span className="block truncate text-xs text-[var(--text-muted)]">
+                          {conversation.last_message || "No messages yet"}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </section>
+              )}
+            </>
           )}
         </div>
       </aside>
