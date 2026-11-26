@@ -49,6 +49,12 @@
  * @property {number} price
  * @property {'subscription'|'one_time'} payment_type
  * @property {string} instructor_id   References User.id where role === 'instructor'.
+ * @property {number} [progress]      0-100 for the asking student; 0 otherwise.
+ * @property {boolean|null} [enrolled] Null when the asker is not a student.
+ * @property {'active'|'completed'|'cancelled'|''|null} [enrollment_status]
+ *   The asking student's enrolment. `""` means a student with no enrolment on
+ *   this course; null means the asker is not a student. There is deliberately
+ *   no payment field: `payment.view` is admin and parent only (see API.md).
  */
 
 /**

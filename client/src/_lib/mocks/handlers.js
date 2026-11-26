@@ -129,6 +129,8 @@ const COURSES = [
     progress: 65,
     module_count: 5,
     instructor_name: "Ms. Sarah",
+    enrolled: true,
+    enrollment_status: "active",
   },
   {
     id: "c2",
@@ -140,6 +142,8 @@ const COURSES = [
     progress: 30,
     module_count: 8,
     instructor_name: "Ms. Sarah",
+    enrolled: true,
+    enrollment_status: "active",
   },
   {
     id: "c3",
@@ -151,6 +155,8 @@ const COURSES = [
     progress: 0,
     module_count: 6,
     instructor_name: "Mr. Ahmed",
+    enrolled: true,
+    enrollment_status: "active",
   },
 ];
 

@@ -398,8 +398,8 @@ Their own classes, in the `GET /sessions` shape below.
 
 ### `GET /courses` — `content.read`
 
-Every course a student may see is a published one they are enrolled on; an instructor and an admin
-see all of them. `progress` is present for a student, absent otherwise.
+A student and a parent see the **published catalogue** — not only the courses the child is enrolled
+on. An instructor sees the courses assigned to them, drafts included; an admin sees everything.
 
 ```json
 [{ "id": "6ada…", "title": "Scratch Programming", "description": "…",
@@ -408,8 +408,29 @@ see all of them. `progress` is present for a student, absent otherwise.
    "instructor_name": "Ms. Sarah Aliyu", "programme_track": "Scratch Programming",
    "status": "published", "is_published": true,
    "modules_count": 3, "lessons_count": 5, "students_count": 4,
-   "completion_rate": 35, "progress": 100, "created_at": "2026-11-02T21:20:28.617Z" }]
+   "completion_rate": 35, "progress": 100,
+   "enrolled": true, "enrollment_status": "active",
+   "created_at": "2026-11-02T21:20:28.617Z" }]
 ```
+
+Because the list is the catalogue rather than a timetable, each row says where the asking student
+stands on it:
+
+| Field | For a student | For anyone else |
+|---|---|---|
+| `progress` | 0–100 on their enrolment, `0` if they have none | `0` |
+| `enrolled` | `true` when active or completed, else `false` | `null` |
+| `enrollment_status` | `active`, `completed`, `cancelled`, or `""` for no enrolment | `null` |
+
+`null` rather than `false` for a non-student is deliberate: "not enrolled" is an answer about a
+pupil, and for an administrator the question is meaningless — a `false` would have every card on
+their screen badged "Not enrolled".
+
+**There is no payment field here, and a student cannot obtain one.** `payment.view` belongs to
+administrators and parents, so `GET /payments` answers a student 403. The retained courses screen
+once badged cards from a child's payment rows; it now reads `enrollment_status`. Whether a fee has
+been paid is between a parent and the school, and enrolment is in any case the school's answer
+rather than the gateway's — an administrator can enrol a child who paid in cash.
 
 `price` is naira for display; `price_kobo` is the stored integer (ADR-002). `module_count` and
 `modules_count` are both present because the retained screens read each, and likewise `thumbnail`
