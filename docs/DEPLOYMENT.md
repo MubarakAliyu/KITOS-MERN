@@ -85,6 +85,7 @@ keep in mind:
 | `NEXT_PUBLIC_SOCKET_URL` | — | ✅ | Normally the same as above. |
 | `NEXT_PUBLIC_API_MOCKING` | — | `disabled` | **Must** be `disabled`. MSW in production would serve fixtures. |
 | `NEXT_PUBLIC_FLW_PUBLIC_KEY` | — | ✅ | `FLWPUBK_TEST-…`. Public by design; it is in the bundle. |
+| `NEXT_PUBLIC_LMS_URL` | — | ✅ | The Vercel production URL. Sets `metadataBase`, so link previews and canonical URLs point at the live site rather than the placeholder domain. |
 | `NEXTAUTH_URL` | — | ✅ | The Vercel production URL. |
 | `NEXTAUTH_SECRET` | — | ✅ *secret* | `openssl rand -base64 32`. |
 | `GOOGLE_CLIENT_ID/SECRET` | — | optional | The provider only registers when both are set. |
@@ -209,8 +210,9 @@ allow-list is wrong — not the deploy.
    command.
 3. Add the client variables from the table above. `NEXT_PUBLIC_API_URL` and
    `NEXT_PUBLIC_SOCKET_URL` are the Render URL; `NEXT_PUBLIC_API_MOCKING` is `disabled`;
-   `NEXTAUTH_URL` is the Vercel production URL Vercel is about to give you (set it after the first
-   deploy and redeploy, or set it to the predicted `https://<project>.vercel.app`).
+   `NEXTAUTH_URL` and `NEXT_PUBLIC_LMS_URL` are the Vercel production URL Vercel is about to give
+   you (set them after the first deploy and redeploy, or set them to the predicted
+   `https://<project>.vercel.app`).
 4. Deploy.
 5. **Go back to Render** and set `CLIENT_ORIGIN` to the exact Vercel production URL — scheme and
    host, no trailing slash, no path. Render redeploys on save.
