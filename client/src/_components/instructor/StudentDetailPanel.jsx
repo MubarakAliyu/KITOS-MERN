@@ -229,6 +229,18 @@ function Section({ title, children }) {
   );
 }
 
+/**
+ * A pupil's assignments, completed or outstanding.
+ *
+ * The API sends objects — `{ id, title, status, grade }` for completed work
+ * and `{ id, title, deadline }` for pending — where the mock fixtures this
+ * screen was built against sent plain strings. Rendering one as a React
+ * child threw error #31 and blanked the whole page, so opening any pupil
+ * from the instructor's list showed "This page couldn't load".
+ *
+ * A string is still accepted, because a caller somewhere may still pass one
+ * and a list is not worth crashing a page over.
+ */
 function AssignmentList({ label, items, icon: Icon, color }) {
   return (
     <div>
@@ -240,14 +252,30 @@ function AssignmentList({ label, items, icon: Icon, color }) {
         <p className="text-xs text-[var(--text-muted)] font-mono-ui">None</p>
       ) : (
         <ul className="flex flex-col gap-1">
-          {items.map((title) => (
-            <li
-              key={title}
-              className="rounded-lg bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-primary)]"
-            >
-              {title}
-            </li>
-          ))}
+          {items.map((item, index) => {
+            const title = typeof item === "string" ? item : item?.title;
+            const deadline = typeof item === "string" ? null : item?.deadline;
+            const grade = typeof item === "string" ? null : item?.grade;
+
+            return (
+              <li
+                key={(typeof item === "string" ? item : item?.id) ?? index}
+                className="flex items-center justify-between gap-2 rounded-lg bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-primary)]"
+              >
+                <span className="min-w-0 truncate">{title ?? "Assignment"}</span>
+                {deadline && (
+                  <span className="shrink-0 text-[10px] text-[var(--text-muted)] font-mono-ui">
+                    Due {deadline}
+                  </span>
+                )}
+                {grade !== null && grade !== undefined && (
+                  <span className="shrink-0 text-[10px] font-bold font-mono-ui" style={{ color }}>
+                    {grade}
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
