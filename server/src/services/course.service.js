@@ -161,7 +161,10 @@ async function courseCounts(courseIds) {
  * `price` is naira because that is what the frontend renders (ADR-002);
  * `price_kobo` rides along so a later screen can do money properly.
  */
-function serializeCourse(course, { counts, instructorName, progress } = {}) {
+function serializeCourse(
+  course,
+  { counts, instructorName, progress, enrollmentStatus } = {}
+) {
   const id = String(course._id);
   return {
     id,
@@ -183,6 +186,31 @@ function serializeCourse(course, { counts, instructorName, progress } = {}) {
     students_count: counts?.enrollments?.get(id)?.count ?? 0,
     completion_rate: Math.round(counts?.enrollments?.get(id)?.progress ?? 0),
     progress: progress ?? 0,
+    /**
+     * Whether the asking student is on this course.
+     *
+     * `GET /courses` gives a student the whole **published** catalogue, not
+     * only their own enrolments, so a card needs to say which it is. The
+     * retained screen used to answer that by fetching the child's payment
+     * rows and badging "Enrolled" or "Payment Pending" from them — which a
+     * student has no permission to read (403 on every visit, swallowed by a
+     * `.catch`), and which told a child whether their parent had paid.
+     * Enrolment is the fact the screen actually needs, and it is the
+     * school's answer rather than the gateway's: an administrator can enrol
+     * a child who paid in cash, and a refund does not un-teach a term.
+     *
+     * Null for anyone who is not a student, where the question is
+     * meaningless.
+     */
+    // `undefined` means the asker is not a student, so the question does not
+    // apply; "" means a student with no enrolment on this course. Testing
+    // truthiness instead would collapse the two, because "" is falsy — which
+    // it did, until a test asked for the un-enrolled case by name.
+    enrolled:
+      enrollmentStatus === undefined
+        ? null
+        : ["active", "completed"].includes(enrollmentStatus),
+    enrollment_status: enrollmentStatus ?? null,
     created_at: course.created_at?.toISOString() ?? null,
   };
 }
@@ -225,28 +253,36 @@ export async function listCourses({ user, query = {} }) {
     : [];
   const nameById = new Map(instructors.map((i) => [String(i._id), i.name]));
 
-  // A student's own progress, in one query rather than one per course.
-  let progressById = new Map();
+  // A student's own enrolments, in one query rather than one per course.
+  let enrollmentById = new Map();
   const student = await studentFor(user);
   if (student) {
     const enrollments = await Enrollment.find({
       student_id: student._id,
       course_id: { $in: ids },
-    }).select("course_id progress");
-    progressById = new Map(
-      enrollments.map((e) => [String(e.course_id), e.progress])
+    }).select("course_id progress status");
+    enrollmentById = new Map(
+      enrollments.map((e) => [
+        String(e.course_id),
+        { progress: e.progress, status: e.status },
+      ])
     );
   }
 
-  return courses.map((course) =>
-    serializeCourse(course, {
+  return courses.map((course) => {
+    const enrollment = enrollmentById.get(String(course._id));
+    return serializeCourse(course, {
       counts,
       instructorName: course.instructor_id
         ? nameById.get(String(course.instructor_id)) ?? null
         : null,
-      progress: progressById.get(String(course._id)) ?? 0,
-    })
-  );
+      progress: enrollment?.progress ?? 0,
+      // An empty string rather than undefined for a student with no
+      // enrolment on this course, so `enrolled` reports false — "not
+      // enrolled" — instead of null, which means "not a student".
+      enrollmentStatus: student ? enrollment?.status ?? "" : undefined,
+    });
+  });
 }
 
 /**

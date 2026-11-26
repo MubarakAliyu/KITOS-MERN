@@ -807,6 +807,84 @@ describe("the positive-language check", () => {
 
 // ── Ownership ───────────────────────────────────────────────────────────────
 
+describe("the course list tells a student where they stand", () => {
+  /**
+   * `GET /courses` gives a student the whole **published** catalogue, not
+   * only the courses they are on, so each card has to say which it is.
+   *
+   * The retained screen used to answer that by fetching the child's payment
+   * rows and badging from them. A student has no `payment.view` permission,
+   * so every visit to `/student/courses` fired a 403 that a `.catch(() =>
+   * [])` swallowed: the badge never rendered and the console filled up. It
+   * was also the wrong question — whether a fee is paid is between a parent
+   * and the school, and "Payment Pending" does not belong on a child's
+   * screen.
+   */
+  it("marks an enrolled course enrolled, and an un-enrolled one not", async () => {
+    const { course: mine } = await makeCourse({ lessons: 1 });
+    const { course: theirs } = await makeCourse({ lessons: 1 });
+    const { student } = await makeFamily();
+    await enrol(student, mine);
+
+    const res = await request(server)
+      .get("/courses")
+      .set(auth(await studentUser(student)));
+
+    expect(res.status).toBe(200);
+    const byId = new Map(res.body.map((c) => [c.id, c]));
+
+    expect(byId.get(String(mine._id)).enrolled).toBe(true);
+    expect(byId.get(String(mine._id)).enrollment_status).toBe("active");
+
+    expect(byId.get(String(theirs._id)).enrolled).toBe(false);
+    expect(byId.get(String(theirs._id)).enrollment_status).toBe("");
+  });
+
+  it("reports a finished course as completed, not merely enrolled", async () => {
+    const { course } = await makeCourse({ lessons: 1 });
+    const { student } = await makeFamily();
+    await enrol(student, course);
+    await Enrollment.updateOne(
+      { student_id: student._id, course_id: course._id },
+      { $set: { status: "completed", progress: 100 } }
+    );
+
+    const res = await request(server)
+      .get("/courses")
+      .set(auth(await studentUser(student)));
+    const row = res.body.find((c) => c.id === String(course._id));
+
+    expect(row.enrollment_status).toBe("completed");
+    expect(row.enrolled).toBe(true);
+  });
+
+  /**
+   * Null, not false. "Not enrolled" is an answer about a pupil; for anyone
+   * else the question is meaningless, and `false` would have the UI badge
+   * every course on an administrator's screen "Not enrolled".
+   */
+  it("leaves the enrolment fields null for a non-student", async () => {
+    await makeCourse({ lessons: 1 });
+    const admin = await makeUser({ role: "admin" });
+
+    const res = await request(server).get("/courses").set(auth(admin));
+
+    expect(res.body[0].enrolled).toBeNull();
+    expect(res.body[0].enrollment_status).toBeNull();
+  });
+
+  /** The permission that made the old approach impossible, stated directly. */
+  it("refuses a student reading payments at all", async () => {
+    const { student } = await makeFamily();
+
+    const res = await request(server)
+      .get("/payments")
+      .set(auth(await studentUser(student)));
+
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("course ownership", () => {
   it("stops an instructor editing a course that is not theirs", async () => {
     const { course } = await makeCourse({ lessons: 1 });
