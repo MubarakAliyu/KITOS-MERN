@@ -41,10 +41,30 @@ export function ChatWindow({
   readOnlyMessage,
 }) {
   const bottomRef = useRef(null);
+  const listRef = useRef(null);
+
+  /**
+   * Keep the newest message in view, by scrolling the list and not the page.
+   *
+   * `scrollIntoView` walks up and scrolls every scrollable ancestor it
+   * finds, which on a phone meant sending a message threw the whole view
+   * back to the top of the dashboard. Setting `scrollTop` on the list moves
+   * only the list.
+   *
+   * Opening a conversation jumps; a new message glides. Smooth-scrolling
+   * the first render would animate past the whole history on the way down.
+   */
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
+  }, [messages.length]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, conversation?.id]);
+    const list = listRef.current;
+    if (!list) return;
+    list.scrollTop = list.scrollHeight;
+  }, [conversation?.id]);
 
   if (!conversation) {
     return (
@@ -121,7 +141,10 @@ export function ChatWindow({
         </AnimatePresence>
 
         {/* Messages */}
-        <div className="flex-1 space-y-1 overflow-y-auto bg-[var(--bg-secondary)] px-4 py-5">
+        <div
+          ref={listRef}
+          className="min-h-0 flex-1 space-y-1 overflow-y-auto bg-[var(--bg-secondary)] px-4 py-5"
+        >
           <MessageList
             messages={messages}
             currentUserId={currentUserId}

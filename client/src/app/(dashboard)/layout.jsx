@@ -18,7 +18,7 @@ export default function DashboardLayout({ children }) {
     <>
       <RouteGuard>
         <ForceResetGuard>
-          <div className="flex h-screen overflow-hidden bg-[var(--bg-secondary)]">
+          <div className="flex h-[100dvh] overflow-hidden bg-[var(--bg-secondary)]">
             <Sidebar />
             <div className="flex flex-1 flex-col overflow-hidden">
               <Topbar />

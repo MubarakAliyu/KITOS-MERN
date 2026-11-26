@@ -74,9 +74,12 @@ export function attachRealtime(httpServer) {
       origin: allowedOrigins(),
       credentials: true,
     },
-    // The client tries WebSocket first and falls back to polling; both are
-    // allowed so a restrictive network still works.
-    transports: ["websocket", "polling"],
+    // Both, in the order the client negotiates them: polling to establish
+    // the session, then an upgrade to WebSocket where the network allows
+    // one. Listing websocket first here would not force it — the client
+    // chooses — but naming polling first matches what actually happens and
+    // keeps chat working on hosts that refuse the upgrade.
+    transports: ["polling", "websocket"],
     // Render's proxy closes an idle connection; a ping well inside that keeps
     // a quiet chat window connected instead of flapping.
     pingInterval: 25000,

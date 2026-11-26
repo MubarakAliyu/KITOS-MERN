@@ -24,6 +24,14 @@ export function useChat(userId) {
   const [messagesByConv, setMessagesByConv] = useState({});
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  /**
+   * The same flag as a ref, read by the send guard.
+   *
+   * `sending` state is a render behind: two keystrokes in the same tick
+   * both see `false` and both post. A ref is current immediately, which is
+   * what a guard against a double send needs.
+   */
+  const sendingRef = useRef(false);
   const [typingUsers, setTypingUsers] = useState({});
   const [socketConnected, setSocketConnected] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -70,13 +78,33 @@ export function useChat(userId) {
     function handleDisconnect() {
       setSocketConnected(false);
     }
+    /**
+     * A message arriving over the socket.
+     *
+     * Appending unconditionally put one send on screen three times. The
+     * server broadcasts a new message to the conversation room *and* to the
+     * recipient's own room, so anyone in both gets it twice; the sender
+     * already has it from the REST response that created it; and the client
+     * used to re-emit after saving, asking for a third relay.
+     *
+     * Two guards, because either alone leaves a gap. Dropping your own
+     * messages stops the echo of something already on screen. Dropping ids
+     * already present stops every other double-delivery, whatever path it
+     * came by — and it is the one that keeps working if the server's emit
+     * strategy changes.
+     */
     function handleMessage(msg) {
       const convId = msg.conversation_id;
       if (!convId) return;
-      setMessagesByConv((prev) => ({
-        ...prev,
-        [convId]: [...(prev[convId] ?? []), msg],
-      }));
+
+      // Already on screen from the REST response that created it.
+      if (msg.sender_id && String(msg.sender_id) === String(userId)) return;
+
+      setMessagesByConv((prev) => {
+        const existing = prev[convId] ?? [];
+        if (msg.id && existing.some((m) => m.id === msg.id)) return prev;
+        return { ...prev, [convId]: [...existing, msg] };
+      });
       setConversations((prev) => {
         const list = Array.isArray(prev) ? prev : [];
         return list.map((c) =>
@@ -179,6 +207,10 @@ export function useChat(userId) {
   const sendMessage = useCallback(
     async ({ text, fileUrl, fileType }) => {
       if (!activeConvId || !userId) return;
+      // A double tap on a slow connection is two messages, not one. The
+      // composer disables itself on `sending`, but the guard belongs here
+      // too — the Enter key does not go through the button.
+      if (sendingRef.current) return;
       const list = Array.isArray(conversations) ? conversations : [];
       const activeConv = list.find((c) => c.id === activeConvId);
       if (!activeConv) return;
@@ -201,6 +233,7 @@ export function useChat(userId) {
       }));
 
       setSending(true);
+      sendingRef.current = true;
       try {
         const saved = await apiSendMessage({
           conversation_id: activeConvId,
@@ -229,13 +262,14 @@ export function useChat(userId) {
           );
         });
 
-        const socket = getSocket();
-        if (socket?.connected) {
-          socket.emit("message", {
-            ...saved,
-            conversation_id: activeConvId,
-          });
-        }
+        /**
+         * No socket emit here.
+         *
+         * `POST /messages` already broadcasts the saved message to the
+         * conversation room and to the recipient. Emitting it again asked
+         * the server to relay a message it had just relayed, which is one
+         * of the three copies a single send used to produce.
+         */
       } catch {
         setMessagesByConv((prev) => ({
           ...prev,
@@ -245,6 +279,7 @@ export function useChat(userId) {
         }));
       } finally {
         setSending(false);
+        sendingRef.current = false;
       }
     },
     [activeConvId, userId, conversations]

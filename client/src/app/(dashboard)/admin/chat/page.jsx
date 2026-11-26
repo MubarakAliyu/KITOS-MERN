@@ -189,7 +189,7 @@ export default function AdminChatPage() {
         </p>
       </header>
 
-      <div className="flex h-[calc(100vh-13rem)] overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]">
+      <div className="flex h-[calc(100dvh-13rem)] overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]">
         {/* Left: list */}
         <aside
           className={`w-full shrink-0 flex-col border-r border-[var(--border-color)] md:w-80 md:flex ${

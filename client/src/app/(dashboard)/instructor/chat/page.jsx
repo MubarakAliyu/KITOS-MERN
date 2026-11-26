@@ -45,7 +45,7 @@ export default function InstructorChatPage() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex h-[calc(100vh-9rem)] overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]"
+      className="flex h-[calc(100dvh-9rem)] overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]"
     >
       <aside
         className={`w-full shrink-0 flex-col border-r border-[var(--border-color)] md:w-80 md:flex ${

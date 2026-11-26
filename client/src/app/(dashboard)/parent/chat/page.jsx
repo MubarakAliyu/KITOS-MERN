@@ -39,7 +39,7 @@ export default function ParentChatPage() {
 
   if (!userId) {
     return (
-      <div className="flex h-[calc(100vh-9rem)] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]">
+      <div className="flex h-[calc(100dvh-9rem)] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]">
         <Loader2 className="h-8 w-8 animate-spin text-[#10B981]" />
       </div>
     );
@@ -62,7 +62,7 @@ export default function ParentChatPage() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex h-[calc(100vh-9rem)] overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]"
+      className="flex h-[calc(100dvh-9rem)] overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]"
     >
       <aside
         className={`w-full shrink-0 flex-col border-r border-[var(--border-color)] md:w-80 md:flex ${
@@ -115,6 +115,14 @@ export default function ParentChatPage() {
                 Back
               </span>
             </div>
+            {/*
+              A parent reads their child's conversations and cannot write
+              in them (ADR-030) — reading is the safeguarding requirement,
+              writing as the child would be impersonation. The composer was
+              shown anyway, so a reply looked possible and came back 403 as
+              "Failed to send · Retry", which reads like a fault rather
+              than a rule.
+            */}
             <ChatWindow
               conversation={activeConversation}
               messages={messages}
@@ -124,6 +132,12 @@ export default function ParentChatPage() {
               typingUsers={typingUsers}
               socketConnected={socketConnected}
               emitTyping={emitTyping}
+              readOnly={Boolean(activeConversation?.observing)}
+              readOnlyMessage={
+                activeConversation?.child_name
+                  ? `This is ${activeConversation.child_name}'s conversation. You can read it, but only they can reply.`
+                  : "You can read this conversation but not reply to it."
+              }
             />
           </>
         ) : (

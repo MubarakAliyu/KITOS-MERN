@@ -46,9 +46,29 @@ export function getSocket() {
         const session = await getSession().catch(() => null);
         callback({ token: session?.accessToken ?? null });
       },
-      transports: ["websocket", "polling"],
-      timeout: 10000,
-      reconnectionAttempts: 5,
+      /**
+       * Polling first, then upgrade — not the other way round.
+       *
+       * With `websocket` first, Socket.IO opens a raw WebSocket before it
+       * has an HTTP session. Render's free tier refuses that handshake, and
+       * the browser reports "closed before the connection is established"
+       * with no fallback: listing polling second does not help, because the
+       * failure is a dead connection rather than a refusal to negotiate.
+       *
+       * This is the library's own default order for the same reason. Polling
+       * connects over ordinary HTTPS, which works anywhere the API works,
+       * and the socket then upgrades to a WebSocket if the network allows
+       * one. Where it does not — a corporate proxy, a captive portal, this
+       * host — chat keeps working on polling instead of silently sitting in
+       * "Offline mode".
+       */
+      transports: ["polling", "websocket"],
+      timeout: 20000,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      // A cold Render instance takes 30 to 50 seconds to wake, which is
+      // longer than the default backoff ever waits.
+      reconnectionDelayMax: 10000,
     });
 
     socketInstance.on("connect_error", (err) => {
