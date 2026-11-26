@@ -20,9 +20,8 @@ import {
 } from "lucide-react";
 import PasswordStrengthBar from "@/_components/auth/PasswordStrengthBar";
 import { getStudentMe } from "@/_lib/api/students";
-import { getPayments } from "@/_lib/api/payments";
+import { getCourses } from "@/_lib/api/courses";
 import { changePassword } from "@/_lib/api/settings";
-import { formatNaira } from "@/_lib/utils/formatters";
 import CourseThumbnail from "@/_components/ui/CourseThumbnail";
 import LanguageTab from "@/_components/settings/LanguageTab";
 import { CheckCircle } from "lucide-react";
@@ -107,26 +106,26 @@ function ProfileTab() {
   const [student, setStudent] = useState(null);
   const [enrollments, setEnrollments] = useState([]);
 
+  /**
+   * Enrolments from the course list, not from payment records.
+   *
+   * This used to fetch the child's payments and build the list from them —
+   * a `403` on every visit, because `payment.view` belongs to administrators
+   * and parents and not to children. It also rendered the fee each payment
+   * was for, so a pupil was being shown what their family had paid. Neither
+   * belongs on a child's own settings page.
+   *
+   * `GET /courses` carries `enrolled` and `enrollment_status` for the asking
+   * pupil, which is the question this section is really asking.
+   */
   useEffect(() => {
-    getStudentMe()
-      .then((s) => {
-        setStudent(s);
-        const sid = s?.id ?? session?.user?.id;
-        if (!sid) return;
-        return getPayments({ student_id: sid }).then((rows) => {
-          // Collapse multi-payments per course to a single enrollment entry.
-          const byCourse = new Map();
-          for (const p of rows ?? []) {
-            const existing = byCourse.get(p.course_id);
-            if (!existing || new Date(p.created_at) > new Date(existing.created_at)) {
-              byCourse.set(p.course_id, p);
-            }
-          }
-          setEnrollments(Array.from(byCourse.values()));
-        });
+    Promise.all([getStudentMe(), getCourses()])
+      .then(([me, courses]) => {
+        setStudent(me);
+        setEnrollments((courses ?? []).filter((course) => course.enrolled));
       })
       .catch(() => {});
-  }, [session?.user?.id]);
+  }, []);
 
   const admissionNo =
     session?.user?.admission_no ?? student?.admission_no ?? null;
@@ -219,21 +218,17 @@ function EnrollmentsSection({ enrollments }) {
               className="flex items-center gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-3"
             >
               <div className="h-12 w-16 shrink-0 overflow-hidden rounded-lg">
-                <CourseThumbnail
-                  course={{ id: e.course_id, title: e.course_title }}
-                  size="sm"
-                />
+                <CourseThumbnail course={e} size="sm" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-bold text-[var(--text-primary)]">
-                  {e.course_title}
+                  {e.title}
                 </p>
                 <p className="text-[11px] text-[var(--text-muted)] font-mono-ui">
-                  {e.type === "subscription" ? "Subscription" : "One-time"} ·{" "}
-                  {formatNaira(e.amount)}
+                  {e.progress ?? 0}% complete
                 </p>
               </div>
-              <EnrollmentBadge status={e.status} />
+              <EnrollmentBadge status={e.enrollment_status} />
             </li>
           ))}
         </ul>
@@ -242,8 +237,24 @@ function EnrollmentsSection({ enrollments }) {
   );
 }
 
+/**
+ * Enrolment, in the pupil's own terms.
+ *
+ * These were payment statuses — paid, pending, failed — because the list
+ * was built from payment records. A child should not be told their family
+ *'s payment failed; what they need to know is whether they are on the
+ * course and whether they have finished it.
+ */
 function EnrollmentBadge({ status }) {
-  if (status === "paid") {
+  if (status === "completed") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#10B981]/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#10B981] font-mono-ui">
+        <CheckCircle className="h-3 w-3" strokeWidth={2.5} />
+        Completed
+      </span>
+    );
+  }
+  if (status === "active") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#10B981]/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#10B981] font-mono-ui">
         <CheckCircle className="h-3 w-3" strokeWidth={2.5} />
@@ -251,18 +262,7 @@ function EnrollmentBadge({ status }) {
       </span>
     );
   }
-  if (status === "pending") {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-500 font-mono-ui">
-        Pending
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-500 font-mono-ui">
-      {status}
-    </span>
-  );
+  return null;
 }
 
 function ReadonlyField({ label, value }) {
