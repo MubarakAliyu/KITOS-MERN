@@ -294,20 +294,35 @@ function Filters({
   return (
     <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:flex-1">
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectClass}>
+        <select
+          aria-label="Filter by status"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          className={selectClass}
+        >
           <option value="all">All Statuses</option>
           <option value="live">Live</option>
           <option value="scheduled">Upcoming</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
         </select>
-        <select value={instructorId} onChange={(e) => setInstructorId(e.target.value)} className={selectClass}>
+        <select
+          aria-label="Filter by instructor"
+          value={instructorId}
+          onChange={(e) => setInstructorId(e.target.value)}
+          className={selectClass}
+        >
           <option value="">All Instructors</option>
           {instructors.map((i) => (
             <option key={i.id} value={i.id}>{i.name}</option>
           ))}
         </select>
-        <select value={courseName} onChange={(e) => setCourseName(e.target.value)} className={selectClass}>
+        <select
+          aria-label="Filter by course"
+          value={courseName}
+          onChange={(e) => setCourseName(e.target.value)}
+          className={selectClass}
+        >
           <option value="">All Courses</option>
           {courses.map((c) => (
             <option key={c.name} value={c.name}>{c.name}</option>
@@ -345,7 +360,12 @@ function SessionsTable({ sessions }) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]">
+    <div
+      role="region"
+      aria-label="Sessions"
+      tabIndex={0}
+      className="overflow-x-auto rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]"
+    >
       <table className="w-full min-w-[860px] text-sm">
         <thead className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] text-left text-xs uppercase tracking-wider text-[var(--text-secondary)] font-mono-ui">
           <tr>

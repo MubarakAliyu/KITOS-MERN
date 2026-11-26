@@ -30,8 +30,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — names only ever live in .env.example, which IS committed.
+# The bare `.env*` this file shipped with also swallowed the example, so the
+# client had no template in the repository at all while DEPLOYMENT.md told
+# the reader to fill one in.
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -42,3 +46,6 @@ next-env.d.ts
 
 # MSW worker — generated on demand by `npm run mocks:init`, never deployed
 public/mockServiceWorker.js
+
+# Lighthouse HTML reports (regenerate with: npm run lighthouse).
+lighthouse-reports/

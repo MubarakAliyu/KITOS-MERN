@@ -801,7 +801,12 @@ function RolesTab() {
         Super Admin has all permissions by default and cannot be restricted.
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-[var(--border-color)]">
+      <div
+      role="region"
+      aria-label="Activity log"
+      tabIndex={0}
+      className="overflow-x-auto rounded-2xl border border-[var(--border-color)]"
+    >
         <table className="w-full min-w-[760px] text-sm">
           <thead className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
             <tr>
@@ -981,7 +986,12 @@ function ActivityLog({ log, filter, setFilter, query, setQuery, onExport }) {
           No activity matches your filters.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-[var(--border-color)]">
+        <div
+      role="region"
+      aria-label="Permissions matrix"
+      tabIndex={0}
+      className="overflow-x-auto rounded-2xl border border-[var(--border-color)]"
+    >
           <table className="w-full min-w-[720px] text-sm">
             <thead className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
               <tr>

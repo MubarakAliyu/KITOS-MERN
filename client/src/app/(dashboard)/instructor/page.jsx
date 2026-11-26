@@ -355,7 +355,12 @@ function RecentSubmissions({ rows, onReview }) {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]">
+        <div
+      role="region"
+      aria-label="Recent submissions"
+      tabIndex={0}
+      className="overflow-x-auto rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]"
+    >
           <table className="w-full min-w-[640px] text-sm">
             <thead className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
               <tr>

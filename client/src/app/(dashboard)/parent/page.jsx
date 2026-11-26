@@ -150,7 +150,18 @@ function ChildSwitcher({ children, activeId, onPick }) {
         Pick a child to see their progress, payments, and notifications.
       </p>
 
-      <div className="mt-4 -mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+      {/*
+        Focusable on purpose: with more children than fit, this strip scrolls
+        sideways, and without a tab stop a keyboard-only parent could not
+        reach the ones off-screen. The role and label give the stop a name
+        worth landing on rather than an anonymous one.
+      */}
+      <div
+        role="region"
+        aria-label="Your children"
+        tabIndex={0}
+        className="mt-4 -mx-1 flex gap-3 overflow-x-auto px-1 pb-1"
+      >
         {children.length === 0
           ? Array.from({ length: 2 }).map((_, i) => (
               <div

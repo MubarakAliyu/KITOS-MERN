@@ -32,6 +32,24 @@ export function publicKey() {
 }
 
 /**
+ * Whether the overlay can actually be opened right now.
+ *
+ * Asked of `window` rather than tracked in React state, deliberately.
+ * `next/script` loads a script once per page and leaves it in the DOM, so a
+ * modal that mounts the `<Script>` again on its second opening does not get
+ * a second `onLoad` — a component relying on that callback alone would
+ * believe the checkout was unavailable from the second payment onwards and
+ * quietly fall back to the hosted redirect.
+ */
+export function isCheckoutReady() {
+  return (
+    Boolean(publicKey()) &&
+    typeof window !== "undefined" &&
+    typeof window.FlutterwaveCheckout === "function"
+  );
+}
+
+/**
  * Opens the overlay and settles when the parent is done with it.
  *
  * Resolves `{ completed: true }` once Flutterwave reports a charge, and

@@ -84,16 +84,24 @@ export default function SessionListCard({ session, index = 0 }) {
   );
 }
 
+/**
+ * One label/value pair inside the card's <dl>.
+ *
+ * `dt`/`dd` rather than two spans: a <dl> whose groups hold neither is not a
+ * definition list to a screen reader, and axe is right to call it an error.
+ * `m-0` on the `dd` clears the browser's default indent, so this renders
+ * exactly as the two spans did.
+ */
 function Row({ label, value, icon: Icon }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)] font-mono-ui">
+      <dt className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)] font-mono-ui">
         {label}
-      </span>
-      <span className="inline-flex items-center gap-1 text-[var(--text-primary)]">
+      </dt>
+      <dd className="m-0 inline-flex items-center gap-1 text-[var(--text-primary)]">
         {Icon && <Icon className="h-3.5 w-3.5 text-[var(--text-muted)]" />}
         {value}
-      </span>
+      </dd>
     </div>
   );
 }

@@ -9,7 +9,10 @@
     "lint": "eslint",
     "test:e2e": "playwright test",
     "mocks:init": "msw init public/",
-    "brand": "node scripts/prepare-brand.mjs"
+    "brand": "node scripts/prepare-brand.mjs",
+    "lighthouse": "node scripts/lighthouse.mjs",
+    "screenshots": "node scripts/capture-screenshots.mjs",
+    "axe:sweep": "node scripts/axe-sweep.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -37,8 +40,10 @@
     "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4",
+    "chrome-launcher": "^1.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "lighthouse": "^12.8.2",
     "msw": "^2.13.6",
     "sharp": "^0.34.5",
     "tailwindcss": "^4"

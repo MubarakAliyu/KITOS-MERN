@@ -269,7 +269,12 @@ export default function AdminUsersPage() {
       ) : visible.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]">
+        <div
+      role="region"
+      aria-label="Users"
+      tabIndex={0}
+      className="overflow-x-auto rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]"
+    >
           <table className="w-full min-w-[760px] text-sm">
             <thead className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
               <tr>

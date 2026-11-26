@@ -21,6 +21,7 @@ import { getCourses } from "@/_lib/api/courses";
 import { initiatePayment, verifyPayment } from "@/_lib/api/payments";
 import {
   FLUTTERWAVE_SCRIPT,
+  isCheckoutReady,
   openCheckout,
   publicKey,
 } from "@/_lib/payments/flutterwave";
@@ -62,7 +63,13 @@ export default function CheckoutModal({
   const [createdPayment, setCreatedPayment] = useState(null);
   const [stageKey, setStageKey] = useState(PROCESSING_STAGE_KEYS[0].key);
   const [showReceipt, setShowReceipt] = useState(false);
-  const [scriptReady, setScriptReady] = useState(false);
+  /**
+   * Only used to re-render once the script arrives. Whether the overlay can
+   * actually open is asked of `window` at the moment of payment, because
+   * `next/script` does not fire `onLoad` again when the modal is reopened
+   * and this flag would then be stale from the second payment onwards.
+   */
+  const [, setScriptReady] = useState(false);
 
   /**
    * A public key means this is a deployment that charges real cards, so the
@@ -147,7 +154,7 @@ export default function CheckoutModal({
           );
           setStageKey(stage.key);
         }
-      } else if (hasPublicKey && scriptReady) {
+      } else if (isCheckoutReady()) {
         const { completed } = await openCheckout({
           reference: init.reference,
           amount: init.amount,

@@ -447,3 +447,62 @@ because a redirect tears the four-step modal down mid-flow and returns the paren
 with no memory of the child and course they had chosen. The hosted link is kept as the fallback for
 a deployment with no `NEXT_PUBLIC_FLW_PUBLIC_KEY`, and `/parent/payments` verifies on return from it.
 
+## ADR-037 — The light theme's contrast is documented, not gated; twelve more dark pairs are exempt
+**Status:** Accepted (decided by the product owner, 26 Nov 2026). Batch 3 widened the axe sweep from
+four dashboard homes to **all 34 main screens, in both themes**, which is what Part F asks for. That
+first full scan found a great deal, and it divides into three findings with three different answers.
+
+### 1. Three real defects, fixed
+These were genuine bugs that the narrow scan had never reached, and all three are now fixed:
+
+- **`select-name` (critical)** — seven filter dropdowns on the session, attendance, recordings and
+  instructor-students screens had no accessible name. A sighted user reads the first option ("All
+  Courses") as the label; a screen reader announced "combo box". Fixed with `aria-label`, no visual
+  change.
+- **`scrollable-region-focusable` (serious)** — the parent dashboard's child strip and the payment
+  table both scroll sideways with no tab stop, so a keyboard-only parent could not reach anything
+  past the fold. Fixed with `tabIndex={0}` and a named `role="region"`.
+- **`definition-list` (serious)** — the session card's `<dl>` held `div > span` pairs, so it
+  announced as a definition list defining nothing. Now `dt`/`dd`, which is what the design already
+  meant; `m-0` on the `dd` keeps the rendering identical.
+
+That these were found only when the scan widened is the useful lesson: a gate that covers the
+easiest four pages in the product reports green about the pages least likely to be wrong.
+
+### 2. Twelve more exempt pairs in the dark theme
+Twelve further contrast pairs (about 27 nodes) appeared on dark-theme screens that had never been
+scanned. Every one is another instance of two patterns ADR-020 and ADR-029 already accepted:
+`--text-muted` (`#6b7280`) on a dark card tint, and a status colour used as text on a 12% tint of
+itself — the teal "In Progress" chip of ADR-029, now also in red, amber, blue and violet. **No new
+kind of failure appeared**, which is the only reason the exemption list was allowed to grow rather
+than the screens being changed. The list is matched per node by exact colour pair, so it still
+cannot swallow anything else.
+
+### 3. The light theme fails broadly, and is recorded rather than gated
+The light theme had **never been scanned** — Batch 1 and Batch 2 both ran in the default dark theme.
+Scanned now, it fails AA text contrast on roughly **330 nodes across 47 distinct colour pairs**. The
+full census is in `docs/PROGRESS.md`.
+
+It is not a list of small oversights; it has one structural cause. Text in the light theme routinely
+sits on pale tints of the brand colours — `#e7f8f2`, `#f8fafc`, `#ecf7f6` and similar — and **on
+those surfaces even `--text-secondary` (`#6b7280`) measures 4.33–4.42:1**, below the 4.5:1 AA floor.
+So the obvious repair does not work: there is no grey that passes AA on those backgrounds while
+still reading as quieter than body text. Fixing it means changing the tints, or giving every chip
+and badge a darker ink — a visual redesign of the retained design, which CLAUDE.md forbids and which
+the product owner has now declined for the third time (ADR-020, ADR-029, and here).
+
+**What was rejected:** adding all 47 pairs to `KNOWN_PALETTE_CONTRAST`. That would have turned the
+suite green while making the exemption list longer than the rule it guards — a gate that passes by
+naming everything that fails it, which is worse than no gate, because it reads as a pass.
+
+**What was done instead:** contrast is enforced on the **dark theme**, which is the default and the
+theme the design was drawn in, and which passes with the documented exemptions. The light theme is
+still scanned in full for **every other** serious and critical rule — that is what caught all three
+defects above — and its contrast is recorded as a known limitation in `docs/PROGRESS.md` and in the
+submission report, with the measured census rather than a vague caveat.
+
+The narrowing is in the open, in the helper's own signature (`{ contrast: false }`) and in a comment
+at the top of `a11y.spec.js`, so nobody reading a green run can mistake its scope. Making the light
+theme accessible is written up as the first item of post-submission work: it is real, it affects
+real users, and it needs a palette decision rather than a patch.
+

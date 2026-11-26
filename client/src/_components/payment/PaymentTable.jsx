@@ -77,7 +77,15 @@ function DesktopTable({ payments, showParent, compact, onViewReceipt }) {
   const textCls = compact ? "text-xs" : "text-sm";
 
   return (
-    <div className="overflow-x-auto">
+    // The table is wider than a phone, so this wrapper scrolls sideways.
+    // Without a tab stop the columns past the fold are unreachable by
+    // keyboard; the role and label give that stop a name.
+    <div
+      role="region"
+      aria-label="Payment history"
+      tabIndex={0}
+      className="overflow-x-auto"
+    >
       <table className={`w-full min-w-[720px] ${textCls}`}>
         <thead className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
           <tr>
