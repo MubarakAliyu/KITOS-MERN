@@ -81,6 +81,80 @@ import { issueCertificate } from "../services/enrollment.service.js";
  * characters. Otherwise the committed demo credentials would become live
  * credentials on a public URL.
  */
+/**
+ * Hosts that mean "this machine", and so cannot be anybody's live database.
+ */
+const LOCAL_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "0.0.0.0",
+  "::1",
+  "[::1]",
+]);
+
+/**
+ * Does this connection string point somewhere other than this machine?
+ *
+ * `mongodb+srv://` is always remote — the scheme exists to look a cluster up
+ * in DNS. For `mongodb://` the host list is compared against the loopback
+ * names above, and **any** remote host in a multi-host string makes the
+ * whole thing remote.
+ *
+ * Unparseable means remote. A connection string this function cannot read is
+ * not one it can vouch for, and the safe answer to "might this be
+ * production?" is yes.
+ */
+export function isRemoteDatabase(uri) {
+  const value = String(uri ?? "").trim();
+  if (!value) return false;
+  if (value.startsWith("mongodb+srv://")) return true;
+  if (!value.startsWith("mongodb://")) return true;
+
+  const afterScheme = value.slice("mongodb://".length);
+  const authority = afterScheme.split(/[/?]/)[0];
+  const hosts = authority.split("@").pop();
+  if (!hosts) return true;
+
+  return hosts.split(",").some((entry) => {
+    const host = entry.trim().replace(/:\d+$/, "").toLowerCase();
+    return host !== "" && !LOCAL_HOSTS.has(host);
+  });
+}
+
+/**
+ * Refuses to seed a database that is not on this machine unless NODE_ENV
+ * says production.
+ *
+ * `resolvePasswords` below keys everything on `NODE_ENV`, which is the right
+ * switch for *what* to write and the wrong one for deciding *whether it is
+ * safe to*. The two came apart in practice: a seed run against Atlas with
+ * NODE_ENV unset took the development branch, ignored the DEMO_*_PASSWORD
+ * values it had been given, and wrote the committed HANDOFF.md credentials
+ * onto a live site — no error, a cheerful summary, and a demo administrator
+ * whose password is in the repository.
+ *
+ * So the destination is checked as well as the label. NODE_ENV is a thing
+ * someone forgets; the host in the connection string is a fact about where
+ * the data is going.
+ */
+function assertSafeDestination() {
+  if (isProduction()) return;
+  if (!isRemoteDatabase(env.MONGODB_URI)) return;
+
+  throw new Error(
+    "Refusing to seed a remote database while NODE_ENV is not production.\n" +
+      `MONGODB_URI points at a host that is not this machine, but NODE_ENV is ` +
+      `"${process.env.NODE_ENV ?? "unset"}" — so the seed would use the demo ` +
+      "passwords published in client/src/HANDOFF.md and ignore any " +
+      "DEMO_*_PASSWORD you supplied.\n\n" +
+      "Re-run with NODE_ENV=production set, which also requires " +
+      "ALLOW_DEMO_SEED=true and DEMO_ADMIN_PASSWORD, DEMO_STAFF_PASSWORD and " +
+      "DEMO_FAMILY_PASSWORD (10+ characters each).\n" +
+      "PowerShell:  $env:NODE_ENV=\"production\"\n" +
+      "bash:        NODE_ENV=production npm run seed"
+  );
+}
+
 function resolvePasswords() {
   if (!isProduction()) {
     return {
@@ -201,6 +275,9 @@ async function backdate(Model, id, when) {
 
 export async function runSeed({ quiet = false } = {}) {
   const say = quiet ? () => {} : (msg) => console.log(msg);
+
+  // Before anything is cleared, hashed or written.
+  assertSafeDestination();
 
   const passwords = resolvePasswords();
   const hashes = await hashAll(passwords);

@@ -228,23 +228,35 @@ else** — not in the repository, not in Render's dashboard. The demo admin can 
 record and confirm payments; a password sitting in a dashboard is a password anyone with dashboard
 access has.
 
+> **`NODE_ENV=production` is not optional here, and it is the one people miss.**
+>
+> It is what makes the seed use the passwords below. Without it the seed takes its development
+> branch, ignores every `DEMO_*_PASSWORD` you set, and writes the demo credentials published in
+> `client/src/HANDOFF.md` to your live database — no error, and a summary that looks like success.
+> `server/.env` says `development`, so a shell that picked that up is enough to cause it.
+>
+> The seed now refuses to run against a remote host unless `NODE_ENV=production`, and the error
+> names this. If you see that refusal, this is the line you are missing — not a flag to work around.
+
 PowerShell:
 
 ```powershell
 cd server
+$env:NODE_ENV = "production"
 $env:MONGODB_URI = "<the Atlas string>"
 $env:ALLOW_DEMO_SEED = "true"
 $env:DEMO_ADMIN_PASSWORD = "<10+ characters>"
 $env:DEMO_STAFF_PASSWORD = "<10+ characters>"
 $env:DEMO_FAMILY_PASSWORD = "<10+ characters>"
 npm run seed
-Remove-Item Env:ALLOW_DEMO_SEED, Env:DEMO_ADMIN_PASSWORD, Env:DEMO_STAFF_PASSWORD, Env:DEMO_FAMILY_PASSWORD
+Remove-Item Env:NODE_ENV, Env:ALLOW_DEMO_SEED, Env:DEMO_ADMIN_PASSWORD, Env:DEMO_STAFF_PASSWORD, Env:DEMO_FAMILY_PASSWORD
 ```
 
 bash:
 
 ```bash
 cd server
+NODE_ENV=production \
 MONGODB_URI="<the Atlas string>" \
 ALLOW_DEMO_SEED=true \
 DEMO_ADMIN_PASSWORD="<10+ characters>" \
@@ -253,8 +265,17 @@ DEMO_FAMILY_PASSWORD="<10+ characters>" \
 npm run seed
 ```
 
-**Check:** the summary prints users, courses, enrolments, sessions, payments and conversations, and
-the live session it creates is in a 60-minute window from now (ADR-028) — so demo it today.
+**Check the summary says `DEMO_*_PASSWORD environment variables`,** not `development defaults
+(client/src/HANDOFF.md)`. That line is the difference between a seeded demo and a public one. In
+production the credentials are written to a git-ignored file rather than printed, so they are not
+left in a terminal scrollback.
+
+Also check that users, courses, enrolments, sessions, payments and conversations are all reported,
+and that the live session it creates is in a 60-minute window from now (ADR-028) — so demo it today.
+
+**If you have already seeded with the development defaults,** re-run this with `NODE_ENV=production`
+set. The seed clears what it wrote, so a second run replaces the published passwords; there is
+nothing to clean up by hand. Do it before the site is shared with anyone.
 
 ### 9. Optional: a custom domain
 

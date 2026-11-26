@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resetState } from "./helpers.js";
-import { runSeed } from "../src/seed/seed.js";
+import { runSeed, isRemoteDatabase } from "../src/seed/seed.js";
+import { resetEnvCache } from "../src/config/env.js";
 import { PAYMENTS, SUBSCRIPTIONS } from "../src/seed/courses.js";
 import { Payment } from "../src/models/Payment.js";
 import { Subscription } from "../src/models/Subscription.js";
@@ -120,5 +121,116 @@ describe("the demo seed", () => {
 
     expect(await Payment.countDocuments({})).toBe(PAYMENTS.length);
     expect(await Subscription.countDocuments({})).toBe(SUBSCRIPTIONS.length);
+  });
+});
+
+/**
+ * The guard that stops a seed writing published passwords to a live site.
+ *
+ * `resolvePasswords` decides what to write from `NODE_ENV`, which is the
+ * right switch for that and the wrong one for deciding whether writing is
+ * safe at all. The two came apart in practice: a run against Atlas with
+ * NODE_ENV unset took the development branch, ignored the DEMO_*_PASSWORD
+ * values it was given, and wrote the credentials published in
+ * client/src/HANDOFF.md onto a live database — with no error and a cheerful
+ * summary. The destination is now checked as well as the label.
+ */
+describe("refusing to seed a remote database by accident", () => {
+  const realUri = process.env.MONGODB_URI;
+  const realNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    process.env.MONGODB_URI = realUri;
+    if (realNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = realNodeEnv;
+    resetEnvCache();
+  });
+
+  /** Pretend the connection string points at Atlas, without going there. */
+  function pointAt(uri, nodeEnv) {
+    process.env.MONGODB_URI = uri;
+    if (nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = nodeEnv;
+    resetEnvCache();
+  }
+
+  it("refuses an Atlas URI when NODE_ENV is unset", async () => {
+    pointAt("mongodb+srv://user:pw@cluster0.abc.mongodb.net/?retryWrites=true", undefined);
+
+    await expect(runSeed({ quiet: true })).rejects.toThrow(
+      /refusing to seed a remote database/i
+    );
+  });
+
+  it("refuses it when NODE_ENV is development", async () => {
+    pointAt("mongodb+srv://user:pw@cluster0.abc.mongodb.net/", "development");
+
+    await expect(runSeed({ quiet: true })).rejects.toThrow(
+      /refusing to seed a remote database/i
+    );
+  });
+
+  /**
+   * The message has to name the fix. Someone meets this error once, at the
+   * end of a deployment, and an error that only says "no" sends them
+   * looking for the flag that turns it off.
+   */
+  it("names NODE_ENV=production and the passwords that were ignored", async () => {
+    pointAt("mongodb+srv://user:pw@cluster0.abc.mongodb.net/", undefined);
+
+    const error = await runSeed({ quiet: true }).catch((err) => err);
+
+    expect(error.message).toMatch(/NODE_ENV=production/);
+    expect(error.message).toMatch(/HANDOFF\.md/);
+    expect(error.message).toMatch(/DEMO_ADMIN_PASSWORD/);
+    expect(error.message).toMatch(/ALLOW_DEMO_SEED=true/);
+  });
+
+  it("refuses a remote host given without the +srv scheme", async () => {
+    pointAt("mongodb://user:pw@cluster0.abc.mongodb.net:27017/kitos", undefined);
+
+    await expect(runSeed({ quiet: true })).rejects.toThrow(
+      /refusing to seed a remote database/i
+    );
+  });
+
+  /**
+   * It refuses before it clears anything. A guard that wipes the database
+   * and then declines to refill it would be worse than no guard.
+   */
+  it("refuses before touching the data", async () => {
+    await runSeed({ quiet: true });
+    const before = await Payment.countDocuments({});
+    expect(before).toBeGreaterThan(0);
+
+    pointAt("mongodb+srv://user:pw@cluster0.abc.mongodb.net/", undefined);
+    await runSeed({ quiet: true }).catch(() => {});
+
+    pointAt(realUri, realNodeEnv);
+    expect(await Payment.countDocuments({})).toBe(before);
+  });
+
+  it("allows the local database it is normally run against", async () => {
+    // The in-memory replica set is 127.0.0.1, same as `npm run db:local`.
+    expect(isRemoteDatabase(process.env.MONGODB_URI)).toBe(false);
+    await expect(runSeed({ quiet: true })).resolves.toBeTruthy();
+  });
+
+  describe("reading the host out of a connection string", () => {
+    it.each([
+      ["mongodb://127.0.0.1:27027/?directConnection=true", false],
+      ["mongodb://localhost:27017/kitos", false],
+      ["mongodb://[::1]:27017", false],
+      ["mongodb://localhost:27017,localhost:27018/kitos", false],
+      ["mongodb+srv://user:pw@cluster0.abc.mongodb.net/", true],
+      ["mongodb://user:pw@cluster0.abc.mongodb.net:27017/kitos", true],
+      // One remote host among local ones still makes the whole string remote.
+      ["mongodb://127.0.0.1:27017,cluster0.abc.net:27017/kitos", true],
+      // Unreadable means remote: a string this cannot vouch for might be
+      // production, and that is the answer to guess.
+      ["not-a-uri", true],
+    ])("%s -> remote: %s", (uri, expected) => {
+      expect(isRemoteDatabase(uri)).toBe(expected);
+    });
   });
 });
