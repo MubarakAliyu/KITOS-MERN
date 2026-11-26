@@ -51,7 +51,12 @@ export default function AttendanceModal({ isOpen, onClose, session }) {
               <span className="text-[#10B981]">({data.percent}%)</span>
             </p>
 
-            <div className="overflow-x-auto rounded-xl border border-[var(--border-color)]">
+            <div
+      role="region"
+      aria-label="Attendance"
+      tabIndex={0}
+      className="overflow-x-auto rounded-xl border border-[var(--border-color)]"
+    >
               <table className="w-full min-w-[420px] text-sm">
                 <thead>
                   <tr className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] text-left text-xs uppercase tracking-wider text-[var(--text-muted)] font-mono-ui">

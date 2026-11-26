@@ -1,8 +1,9 @@
 # KITOS 2.0 — API reference
 
-Every endpoint implemented so far. Batch 1 covers authentication, accounts, families and platform
+Every endpoint implemented. Batch 1 covers authentication, accounts, families and platform
 settings; Batch 2 adds courses and content, the work a child does, certificates and the live and
-hybrid sessions; Batch 3 will add chat and payments.
+hybrid sessions; Batch 3 adds chat over Socket.IO, Flutterwave payments, admin analytics and the
+activity log. Nothing here is a placeholder any more.
 
 **Base URL** — `NEXT_PUBLIC_API_URL`. No `/api/v1` prefix: the frontend calls `/login`, `/admin/users`
 and so on directly (ADR-005).
@@ -397,8 +398,8 @@ Their own classes, in the `GET /sessions` shape below.
 
 ### `GET /courses` — `content.read`
 
-Every course a student may see is a published one they are enrolled on; an instructor and an admin
-see all of them. `progress` is present for a student, absent otherwise.
+A student and a parent see the **published catalogue** — not only the courses the child is enrolled
+on. An instructor sees the courses assigned to them, drafts included; an admin sees everything.
 
 ```json
 [{ "id": "6ada…", "title": "Scratch Programming", "description": "…",
@@ -407,8 +408,29 @@ see all of them. `progress` is present for a student, absent otherwise.
    "instructor_name": "Ms. Sarah Aliyu", "programme_track": "Scratch Programming",
    "status": "published", "is_published": true,
    "modules_count": 3, "lessons_count": 5, "students_count": 4,
-   "completion_rate": 35, "progress": 100, "created_at": "2026-11-02T21:20:28.617Z" }]
+   "completion_rate": 35, "progress": 100,
+   "enrolled": true, "enrollment_status": "active",
+   "created_at": "2026-11-02T21:20:28.617Z" }]
 ```
+
+Because the list is the catalogue rather than a timetable, each row says where the asking student
+stands on it:
+
+| Field | For a student | For anyone else |
+|---|---|---|
+| `progress` | 0–100 on their enrolment, `0` if they have none | `0` |
+| `enrolled` | `true` when active or completed, else `false` | `null` |
+| `enrollment_status` | `active`, `completed`, `cancelled`, or `""` for no enrolment | `null` |
+
+`null` rather than `false` for a non-student is deliberate: "not enrolled" is an answer about a
+pupil, and for an administrator the question is meaningless — a `false` would have every card on
+their screen badged "Not enrolled".
+
+**There is no payment field here, and a student cannot obtain one.** `payment.view` belongs to
+administrators and parents, so `GET /payments` answers a student 403. The retained courses screen
+once badged cards from a child's payment rows; it now reads `enrollment_status`. Whether a fee has
+been paid is between a parent and the school, and enrolment is in any case the school's answer
+rather than the gateway's — an administrator can enrol a child who paid in cash.
 
 `price` is naira for display; `price_kobo` is the stored integer (ADR-002). `module_count` and
 `modules_count` are both present because the retained screens read each, and likewise `thumbnail`
@@ -753,19 +775,244 @@ The UI reads the platform name and logo, so every role may read it.
 
 ---
 
-## Awaiting later batches
+## Chat (Batch 3)
 
-These answer with correctly shaped **empty** data so the retained screens render their empty states
-rather than logging 404s (ADR-018). All are authenticated reads; none writes.
+Who may talk to whom is an **allow-list**, not a deny-list, and it is enforced in the service on
+every send — not only when a conversation is opened (ADR-030):
 
-| Endpoint | Returns | Arrives |
+| | admin | instructor | parent | student |
+|---|---|---|---|---|
+| **admin** | ✔ | ✔ | ✔ | ✔ |
+| **instructor** | ✔ | | ✔ | ✔ (shared course) |
+| **parent** | ✔ | ✔ | | (observes own child) |
+| **student** | ✔ | ✔ (shared course) | | **never** |
+
+Student↔student is refused with 403 and is the rule the product exists to enforce (PRD §10). A
+parent **observes** their child's conversations: they are returned with `observing: true` and a
+write is refused with 403 — reading a child's messages is the safeguarding requirement, writing as
+them would be impersonation.
+
+### `GET /conversations` — `chat.use`
+
+Every conversation the caller may see, newest activity first. A parent also receives their child's,
+marked `observing: true` with `child_name` set.
+
+```json
+[
+  {
+    "id": "...",
+    "participant_ids": ["...", "..."],
+    "other_party": { "id": "...", "name": "Ms. Sarah Aliyu", "role": "instructor" },
+    "last_message": "Liam did well on the quiz.",
+    "last_message_at": "2026-11-25T10:04:00.000Z",
+    "unread_count": 2,
+    "observing": false,
+    "child_name": null,
+    "reported": false
+  }
+]
+```
+
+### `GET /messages?conversation_id=…` — `chat.use`
+
+The transcript, oldest first. 403 if the caller is neither a participant nor the observing parent.
+
+### `POST /messages` — `chat.use`
+
+`{ conversation_id?, recipient_id?, body, attachment_url? }`. One of `conversation_id` or
+`recipient_id` is required; with `recipient_id` the conversation is found or created. The pair is
+re-checked here, so a conversation that was legitimate when opened cannot be used after the
+relationship ends.
+
+| Status | When |
+|---|---|
+| 201 | Sent; the message is also emitted to both parties' sockets |
+| 403 | Pair not allowed, observer attempting to write, or admin not a participant |
+| 404 | No such conversation or recipient |
+| 429 | More than 30 messages a minute |
+
+Rich text is sanitised on write (ADR-024), so a stored message can never carry script.
+
+### `PUT /messages/read` — `chat.use`
+
+`{ conversation_id }`. Marks everything the caller has received as read. An observing parent reading
+their child's conversation does **not** mark it read for the child.
+
+### `GET /chat/contacts` — `chat.use`
+
+Who this caller is allowed to start a conversation with, already filtered by the matrix above, so
+the UI never offers a recipient the API would refuse.
+
+### `POST /chat/report` — `chat.use`
+
+`{ conversation_id, reason }`. Flags a conversation for an administrator and writes an activity-log
+row. Reporting is available to everyone including children.
+
+### `GET /admin/chat/all-conversations` — `chat.monitor`
+
+Every conversation on the platform for the monitoring screen, **reported ones first**. Admins can
+read transcripts here without being participants; doing so is audited.
+
+---
+
+## Socket.IO (Batch 3)
+
+Same origin as the API, default path `/socket.io`. The handshake carries the same Bearer token as
+REST:
+
+```js
+io(SOCKET_URL, { auth: { token: accessToken } });
+```
+
+The handshake is verified exactly as a request is — signature, expiry, account still active, and
+`tv` against the user's current `token_version` — so a password change or a deactivation drops the
+socket's right to reconnect rather than leaving a live connection trusted for 24 hours. A bad or
+missing token is refused with `connect_error`.
+
+Each connection joins a private room for its own user id. Conversation rooms are joined on demand
+and only after the same allow-list check the REST route makes.
+
+| Event | Direction | Payload | Notes |
+|---|---|---|---|
+| `message` | client → server | `{ conversation_id, body }` or `{ id }` | With `id` it relays an already-persisted message; otherwise it persists through the same service the REST route uses (ADR-031), so a message cannot exist in one path and not the other |
+| `message` | server → client | the serialised message | To both participants, and to the observing parent |
+| `typing` | both | `{ conversation_id, typing }` | Not persisted |
+| `read` | server → client | `{ conversation_id, reader_id }` | |
+| `notification` | server → client | the serialised notification | Payments, announcements, sessions and submissions all push here |
+| `connect_error` | server → client | `Error` | Bad, expired or revoked token |
+
+---
+
+## Payments (Batch 3)
+
+**Flutterwave v3, test mode** (ADR-036, which replaced Paystack). Two rules govern everything here:
+
+1. **The amount comes from the course, never from the request.** The retained modal sends an
+   `amount` because its mock handlers did; the validator accepts it and the service ignores it.
+2. **Confirmation happens exactly once**, whether verify arrives first, the webhook does, or both
+   land in the same millisecond (AC3.3). A single atomic update whose filter requires
+   `status: "pending"` is what claims the payment; the winner alone issues the receipt number and
+   activates the enrolment, in one transaction.
+
+Money is stored as integer kobo and serialised as naira (ADR-002). Flutterwave quotes **naira**, so
+the conversion happens in `lib/flutterwave.js` and nowhere else.
+
+**Simulated mode.** With `FLW_SECRET_KEY` unset the gateway answers locally: initiate returns an
+inert link, verify reports success for the amount on the row, and the webhook refuses to act. The
+whole four-step flow therefore runs offline and in CI with no Flutterwave account, and a payment
+confirmed that way is stamped `confirmed_via: "simulated"` so no receipt can be mistaken for a
+settled one — the PDF says so on its face.
+
+### `POST /payments/initiate` — `payment.make` (parent)
+
+`{ student_id, course_id, type?, amount?(ignored) }`
+
+```json
+{
+  "reference": "KIT-0MWWP97CN2B14429D5AEA5793",
+  "link": "https://checkout.flutterwave.com/v3/hosted/pay/…",
+  "amount": 15000,
+  "amount_kobo": 1500000,
+  "simulated": false,
+  "payment": { "id": "...", "status": "pending", "...": "..." }
+}
+```
+
+The pending row is written **before** the gateway is called, so a checkout that is started and
+abandoned is still visible to an administrator rather than vanishing.
+
+| Status | When |
+|---|---|
+| 201 | Opened |
+| 400 | The course has no fee set, or the gateway refused (the row is marked `failed`) |
+| 403 | A parent paying for another family's child |
+| 404 | No such student or course |
+
+### `POST /payments/verify` — `payment.make` (parent)
+
+`{ reference }` — everything else is read from the payment row. Calls
+`GET /v3/transactions/verify_by_reference`, checks status, amount, currency NGN and the returned
+reference, then confirms.
+
+```json
+{ "status": "success", "reference": "KIT-…", "payment": { "...": "..." }, "already_confirmed": false }
+```
+
+`already_confirmed: true` means the webhook got there first; the response is identical otherwise, and
+the receipt number is the same one. Safe to call repeatedly.
+
+| Status | When |
+|---|---|
+| 200 | Confirmed, or already was |
+| 400 | The gateway's amount does not match the course fee — the payment is marked `failed` and nothing is activated |
+| 403 | Another family's payment |
+| 404 | Unknown reference |
+
+### `POST /payments/webhook` — *Public, authenticated by header*
+
+Flutterwave authenticates webhooks with a **static secret** in the `verif-hash` header, compared in
+constant time against `FLW_WEBHOOK_HASH`. That is weaker than a body signature: it proves the sender
+knows the secret and says nothing about whether the figures in the body are genuine. So the body is
+used for exactly one thing — learning which reference to ask about — and the transaction is
+**re-verified against the API** before anything is marked paid.
+
+Always answers 200, including for a rejected hash: a wrong hash will never become right, and a 4xx
+earns hours of retries. An unknown reference is dropped before any API call.
+
+```json
+{ "received": true, "handled": true, "already_confirmed": false }
+```
+
+### `GET /payments` — `payment.view`
+
+A parent sees their own; an admin sees all. Query: `parent_id`, `student_id`, `status`, `type`,
+`from`, `to`, `q` (searches names, course and reference). Filters that would widen a parent's view
+are ignored rather than obeyed.
+
+### `GET /payments/stats` — `payment.view`
+
+Totals, the subscription/one-off split, pending and failed counts, and six months of bars — always
+six, so a quiet month is a gap rather than a missing category the chart would silently drop.
+
+### `GET /payments/:id/receipt` — `payment.view`
+
+JSON by default; `?format=pdf` returns the A4 receipt with the KIT and StarNova marks. The owner or
+an admin; 400 while the payment is not yet paid.
+
+### `GET /subscriptions` · `POST /subscriptions/cancel` — `payment.view` / `payment.make`
+
+One plan per child per course. Cancelling marks the plan cancelled **here**; it cancels nothing at
+Flutterwave, because KITOS never created a payment plan there — each month is charged as its own
+transaction, so there is nothing to cancel and no further charge simply arrives.
+
+### `GET /admin/payments` — `payment.view` + admin
+
+`{ payments: [...], total_revenue: 0 }`.
+
+---
+
+## Admin analytics (Batch 3)
+
+### `GET /admin/stats` — `analytics.view`
+
+The dashboard tiles, every figure computed from the collections rather than stored: a cached total is
+a number that was true once, which is worse than slow because nobody can tell by looking. The
+`*_change` fields compare this month with last.
+
+### `GET /admin/analytics?months=6` — `analytics.view`
+
+Five series plus three scalars, keyed exactly as the retained Recharts components read them — a
+renamed field does not degrade a chart, it draws an empty one.
+
+| Field | Shape | Note |
 |---|---|---|
-| `GET /payments`, `GET /subscriptions` | `[]` | Batch 3 |
-| `GET /payments/stats` | zeroed totals with six named months | Batch 3 |
-| `GET /conversations`, `GET /messages` | `[]` | Batch 3 |
-| `GET /admin/chat/all-conversations` | `[]` | Batch 3 |
-| `GET /admin/analytics` | five empty named series | Batch 3 |
-| `GET /admin/payments` | `{ payments: [], total_revenue: 0 }` | Batch 3 |
+| `enrollment_trend` | `[{ month, students }]` | **Cumulative**: per-month arrivals would dip in a quiet month and read as pupils leaving |
+| `revenue_monthly` | `[{ month, subscription, one_time }]` | Always the full span |
+| `course_completion` | `[{ course, rate }]` | A course nobody is on is 0%, not absent |
+| `quiz_performance` | `[{ month, average }]` | **Months with no attempts are omitted**, not plotted as zero, which would read as a cohort that failed everything |
+| `payment_split` | `[{ name, value, fill }]` | |
+| `attendance_rate` | number | Over classes actually held; a future class would drag it down for no reason |
+| `active_users`, `sessions_held` | number | |
 
 ---
 

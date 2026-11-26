@@ -27,25 +27,61 @@ problem-solving.
 | C1.2 | Literature review justifying problem and solution | Docs | Project report Ch. 2 | ✅ |
 | C2.1 | Front-end architecture defined | Docs, 1 | Report §3.6; `client/`, `client/README.md` | ✅ |
 | C2.2 | Back-end architecture defined | Docs, 1 | Report §3.6, §3.9; PRD §7, §9; `server/src/`, `docs/API.md` | ✅ |
-| C2.3 | Database model defined | Docs, 1–2 | Report §3.8 (Figs 3.2, 3.6); PRD §8; `server/src/models/` (21 of 24 collections) | ✅ (Batches 1–2) |
-| C2.4 | Cloud infrastructure defined | Docs, 3 | Report §3.7 (Fig 3.5); PRD §15.2; `render.yaml` | ✅ (design) |
+| C2.3 | Database model defined | Docs, 1–3 | Report §3.8 (Figs 3.2, 3.6); PRD §8; `server/src/models/` — **26 collections** | ✅ |
+| C2.4 | Cloud infrastructure defined | Docs, 3 | Report §3.7 (Fig 3.5); PRD §15.2; **`render.yaml`**, `docs/DEPLOYMENT.md` | ✅ |
 | C2.5 | Diagrams | Docs | Report Figs 2.1, 3.1–3.9, 4.1–4.2 | ✅ |
 | C2.6 | Technology choices justified | Docs | Report §3.6.1 | ✅ |
-| C3.1 | Clean, modular code (layered server, permission matrix) | 1–3 | `server/src/{routes,controllers,services,models}`, `config/permissions.js` | ✅ (Batches 1–2) |
-| C3.2 | Scalability (stateless API, indexes, pagination) | 1–3 | model indexes; `lib/pagination.js`; atomic counters in `lib/numbering.js`; transactions on certificate issue | ✅ (Batches 1–2) |
+| C3.1 | Clean, modular code (layered server, permission matrix) | 1–3 | `server/src/{routes,controllers,services,models}`, `config/permissions.js`; the gateway behind one wrapper (ADR-036) | ✅ |
+| C3.2 | Scalability (stateless API, indexes, pagination) | 1–3 | model indexes; `lib/pagination.js`; atomic counters in `lib/numbering.js`; transactions on certificate issue and payment confirmation; the atomic `pending → paid` claim | ✅ |
 | C3.3 | Continuous integration | 1 | `.github/workflows/ci.yml` — server lint/test/audit, client lint/build/MSW check, live end-to-end | ✅ |
-| C3.4 | Automated testing | 1–3 | `server/test/` (418), `client/e2e/` (46, desktop + Pixel 7, with axe, including two full journeys) | ✅ (Batches 1–2) |
-| C3.5 | Cloud deployment tools integrated | 3 | `render.yaml`, Vercel project, Atlas | |
+| C3.4 | Automated testing | 1–3 | `server/test/` — **542 tests**, services at **85% lines**; `client/e2e/` — smoke, two journeys and an accessibility sweep over all 34 screens in both themes, desktop + Pixel 7 | ✅ |
+| C3.5 | Cloud deployment tools integrated | 3 | `render.yaml` (Blueprint, health check, generated `JWT_SECRET`, secrets `sync: false`); Vercel root `client`; `docs/DEPLOYMENT.md` | ✅ (configured; the deploy itself is C4.1) |
 | C4.1 | Deployed on public cloud (Vercel + Render + Atlas) | 3 | `docs/DEPLOYMENT.md` | |
 | C4.2 | Public link works | 3 | URL recorded in README and DEPLOYMENT.md | |
-| C5.1 | Professional report 2,500–3,500 words | Docs, 3 | `docs/REPORT-SUBMISSION.md` condensed from the full project report | |
-| C5.2 | 10-minute presentation / demo | 3 | `docs/DEMO-SCRIPT.md`, `docs/PITCH.md` | |
-| C5.3 | Submission link (repo + live URL) | 3 | README header | |
+| C5.1 | Professional report 2,500–3,500 words | Docs, 3 | `docs/REPORT-SUBMISSION.md` — **2,842 words**, condensed from the full project report | ✅ (results table awaits the live run) |
+| C5.2 | 10-minute presentation / demo | 3 | `docs/DEMO-SCRIPT.md` (timed to 10 min), `docs/PITCH.md` (9 slides with talk track) | ✅ (scripted; the recording needs the live site) |
+| C5.3 | Submission link (repo + live URL) | 3 | README **Submission** table — repo filled, live URL pending the deploy | 🟡 |
 
 ## Batch coverage notes
 
 Claude Code adds a dated note here at the end of each batch: which rows moved, and what still needs the student
 (accounts, recording, submission).
+
+### Batch 3 — 26 November 2026
+
+**Rows that moved.** C2.3, C2.4, C3.1, C3.2 and C3.4 from "(Batches 1–2)" to done — the collection
+set is complete at 26, the cloud infrastructure is a committed `render.yaml` rather than a drawing,
+and the test suite is 542 server tests with service coverage at 85% lines and 85% functions. C3.5 is
+configured. C5.1 and C5.2 are written: the submission report is 2,842 words and the demo script is
+timed to ten minutes.
+
+**Still outstanding, and why.** C4.1 and C4.2 — deployment and a working public link — need accounts
+only the author can create: MongoDB Atlas, Cloudinary, an SMTP sender, Flutterwave test keys, a
+Render Blueprint and a Vercel project with root `client`. Every click is written out in
+`docs/DEPLOYMENT.md`, whose 25-row production test report is left entirely ⏳. C5.3 is half done: the
+README's submission table carries the repository, and the live URL goes in when it exists. **No row
+above is ticked on the strength of being ready to run.**
+
+**The criterion that is still not fully met, and it got larger.** PRD NFR2 asks for no serious or
+critical axe violations. This batch widened the sweep from four dashboard homes to **all 34 main
+screens in both themes**, which is what the brief asks for and which had never been done. Three
+genuine defects fell out and were fixed: seven filter dropdowns with no accessible name (critical),
+three scrolling tables with no keyboard tab stop, and a definition list defining nothing.
+
+It also established that **the light theme fails AA contrast broadly** — about 330 nodes across 47
+colour pairs — for a structural reason: text sits on pale tints of the brand colours, where even
+`--text-secondary` measures 4.33–4.42:1. No grey passes there while still reading as muted, so it
+needs a palette change, which ADR-020 and now ADR-037 record the product owner declining in order to
+keep the retained design. Listing all 47 pairs as exemptions was rejected as a gate that passes by
+naming everything that fails it. Contrast is enforced on the dark theme, which is the default and
+passes; every other serious and critical rule is enforced in both. The narrowing is stated in the
+test helper and in `a11y.spec.js`, and the census is in `docs/PROGRESS.md` — reproducible with
+`npm run axe:sweep`.
+
+**Also recorded.** Lighthouse is now measurable with `npm run lighthouse`: 99 performance, 92
+accessibility, 100 best practices against a production build locally. The SEO score of 63 is correct
+and deliberate — the application sets `robots: index: false`, because a children's learning platform
+should not be indexed. The live-URL run is pending deployment.
 
 ### Batch 2 — 3 November 2026
 
@@ -92,7 +128,7 @@ against a real API on a seeded database.
 
 **Still outstanding.** C2.4 and C3.5 (cloud infrastructure and deployment tooling) remain at design
 stage, and C4.1, C4.2, C5.1, C5.2 and C5.3 are Batch 3 work. Those need the student to create the
-accounts first — MongoDB Atlas, Render, Vercel, Cloudinary, SMTP and Paystack test keys — and the
+accounts first — MongoDB Atlas, Render, Vercel, Cloudinary, SMTP and Flutterwave test keys — and the
 GitHub repository `MubarakAliyu/KITOS-MERN`, without which CI cannot actually run. The 10-minute
 recording and the condensed submission report are also Batch 3.
 

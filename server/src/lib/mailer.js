@@ -56,12 +56,15 @@ function outboxName(to, subject) {
  */
 export async function sendMail({ to, subject, text, html }) {
   const from = env.MAIL_FROM;
+  // The sender must be an address the provider has verified; replies belong
+  // to the school (ADR-035).
+  const replyTo = env.MAIL_REPLY_TO;
 
   try {
     const smtp = getTransporter();
 
     if (smtp) {
-      await smtp.sendMail({ from, to, subject, text, html });
+      await smtp.sendMail({ from, replyTo, to, subject, text, html });
       logger.info({ to, subject }, "Email sent over SMTP");
       return { delivered: true, transport: "smtp" };
     }
@@ -71,6 +74,7 @@ export async function sendMail({ to, subject, text, html }) {
     const body =
       [
         `From: ${from}`,
+        `Reply-To: ${replyTo}`,
         `To: ${to}`,
         `Subject: ${subject}`,
         `Date: ${new Date().toUTCString()}`,

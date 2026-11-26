@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Script from "next/script";
 import { motion, AnimatePresence } from "motion/react";
 import { useSession } from "next-auth/react";
 import {
@@ -18,6 +19,12 @@ import { toast } from "sonner";
 import { getChildren } from "@/_lib/api/parents";
 import { getCourses } from "@/_lib/api/courses";
 import { initiatePayment, verifyPayment } from "@/_lib/api/payments";
+import {
+  FLUTTERWAVE_SCRIPT,
+  isCheckoutReady,
+  openCheckout,
+  publicKey,
+} from "@/_lib/payments/flutterwave";
 import { notifyAdmin } from "@/_lib/notifications/adminNotify";
 import { useLiveNotify } from "@/_lib/notifications/liveNotify";
 import { formatNaira } from "@/_lib/utils/formatters";
@@ -31,12 +38,12 @@ const STEPS = ["select", "confirm", "processing", "success"];
 // Processing stage timing — labels resolved through t() at render time so a
 // mid-flow language switch still reads correctly.
 const PROCESSING_STAGE_KEYS = [
-  { at: 0, key: "payments.connectingPaystack" },
+  { at: 0, key: "payments.connectingGateway" },
   { at: 1000, key: "payments.verifyingPayment" },
   { at: 2000, key: "payments.confirmingEnrollment" },
 ];
 
-export default function PaystackModal({
+export default function CheckoutModal({
   isOpen,
   onClose,
   defaultCourseId,
@@ -56,6 +63,21 @@ export default function PaystackModal({
   const [createdPayment, setCreatedPayment] = useState(null);
   const [stageKey, setStageKey] = useState(PROCESSING_STAGE_KEYS[0].key);
   const [showReceipt, setShowReceipt] = useState(false);
+  /**
+   * Only used to re-render once the script arrives. Whether the overlay can
+   * actually open is asked of `window` at the moment of payment, because
+   * `next/script` does not fire `onLoad` again when the modal is reopened
+   * and this flag would then be stale from the second payment onwards.
+   */
+  const [, setScriptReady] = useState(false);
+
+  /**
+   * A public key means this is a deployment that charges real cards, so the
+   * inline script is worth loading as soon as the modal opens — by the time
+   * the parent has chosen a child and a course it is ready, and the overlay
+   * opens without a wait. With no key the script is never fetched.
+   */
+  const hasPublicKey = Boolean(publicKey());
 
   // Boot — load roster + catalog once whenever the modal opens.
   useEffect(() => {
@@ -102,39 +124,76 @@ export default function PaystackModal({
     }
   }, [selectedCourse]);
 
+  /**
+   * Steps 3 and 4 of the flow (ADR-036).
+   *
+   * Three routes to the same confirmation, chosen by what the deployment
+   * actually has. Note what none of them do: send an amount. The fee comes
+   * from the course on the server, and the figures below are only ever shown
+   * to the parent, never used to decide what is charged.
+   */
   async function handlePay() {
     if (!selectedChild || !selectedCourse) return;
     setStep("processing");
+    setStageKey(PROCESSING_STAGE_KEYS[0].key);
+
     try {
-      // Stage 1 — initiate.
       const init = await initiatePayment({
         student_id: selectedChild.id,
         course_id: selectedCourse.id,
-        amount: selectedCourse.price,
         type: paymentType,
       });
 
-      // Walk the processing labels while the (mock) Paystack popup would be
-      // open. In prod we'd launch PaystackPop here and verify on callback.
-      for (const stage of PROCESSING_STAGE_KEYS) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, stage.at === 0 ? 0 : 800)
-        );
-        setStageKey(stage.key);
+      if (init.simulated) {
+        // The API has no Flutterwave key, so there is no checkout to open.
+        // Walking the stage labels keeps the four steps reading as they
+        // always have, and the confirmation that follows is the real one.
+        for (const stage of PROCESSING_STAGE_KEYS) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, stage.at === 0 ? 0 : 800)
+          );
+          setStageKey(stage.key);
+        }
+      } else if (isCheckoutReady()) {
+        const { completed } = await openCheckout({
+          reference: init.reference,
+          amount: init.amount,
+          email: session?.user?.email,
+          name: session?.user?.name,
+        });
+
+        if (!completed) {
+          // Dismissed without paying. The payment stays pending, which is
+          // what an administrator should see, and the parent returns to the
+          // step they came from rather than to a success they never had.
+          toast.error(t("payments.paymentCancelled"));
+          setStep("confirm");
+          return;
+        }
+        setStageKey("payments.verifyingPayment");
+      } else if (init.link) {
+        // Nothing to open an overlay with, so hand the parent to the hosted
+        // checkout. The API set its redirect back to
+        // /parent/payments?tx_ref=…, and that page verifies on return.
+        window.location.assign(init.link);
+        return;
+      } else {
+        throw new Error("No checkout is available for this payment");
       }
 
-      // Stage 2 — verify.
-      const verified = await verifyPayment({
-        reference: init.reference,
-        course_id: selectedCourse.id,
-        course_title: selectedCourse.title,
-        student_id: selectedChild.id,
-        student_name: selectedChild.name,
-        parent_id: selectedChild.parent_id,
-        parent_name: session?.user?.name ?? "Mrs. Fatima Hassan",
-        amount: selectedCourse.price,
-        type: paymentType,
-      });
+      const verified = await verifyPayment({ reference: init.reference });
+
+      /**
+       * The server decides. A verify can legitimately come back as anything
+       * but success — a card declined after the overlay closed, or an amount
+       * that did not match the fee — and reporting that as a confirmed
+       * enrolment would be the worst thing this screen could do.
+       */
+      if (verified.status !== "success") {
+        toast.error(t("notifications.paymentFailed"));
+        setStep("confirm");
+        return;
+      }
 
       setReference(verified.reference);
       setCreatedPayment(verified.payment ?? null);
@@ -166,6 +225,21 @@ export default function PaystackModal({
 
   return (
     <>
+      {/*
+        Loaded through next/script so it is fetched once per page however
+        many times the modal is opened, and only where a key exists to use
+        it with. `lazyOnload` keeps it off the critical path: nothing on the
+        payments screen needs it until the parent reaches step 2.
+      */}
+      {isOpen && hasPublicKey && (
+        <Script
+          src={FLUTTERWAVE_SCRIPT}
+          strategy="lazyOnload"
+          onLoad={() => setScriptReady(true)}
+          onError={() => setScriptReady(false)}
+        />
+      )}
+
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -516,12 +590,17 @@ function ConfirmStep({ t, child, course, paymentType, onBack, onPay }) {
 
       <div className="flex flex-col gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-4">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-mono-ui text-sm font-bold tracking-wider text-[#0BA5EC]">
-            Paystack
+          {/*
+            Flutterwave's brand orange, in place of Paystack's blue. The
+            layout, type and spacing are untouched — only the name and the
+            colour of the name changed (ADR-036).
+          */}
+          <span className="font-mono-ui text-sm font-bold tracking-wider text-[#F5A623]">
+            Flutterwave
           </span>
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--text-muted)] font-mono-ui">
             <Shield className="h-3 w-3" />
-            {t("payments.securedByPaystack")}
+            {t("payments.securedByFlutterwave")}
           </span>
         </div>
         <div className="flex flex-wrap gap-2">

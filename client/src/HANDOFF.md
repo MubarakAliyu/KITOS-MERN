@@ -1,6 +1,18 @@
 # KIT LMS Frontend — Handoff Document
 
-**Status:** Ready for backend integration.
+**Status:** Superseded. Kept as the record of the frontend as it was handed
+over, before KITOS 2.0 gave it a real backend. Read it for the design intent,
+not for what the code does now.
+
+Two things it describes have since changed, and they are the ones most likely
+to mislead:
+
+- **The data is no longer mocked.** MSW is off by default; every screen listed
+  below is served by the Express API. `docs/API.md` is the current contract.
+- **The payment provider is Flutterwave, not Paystack** (25 November 2026,
+  ADR-036). The four-step flow and its look are unchanged; the provider step
+  and the `/payments/*` routes behind it are not. The component is
+  `CheckoutModal.jsx`.
 
 ## What is built
 

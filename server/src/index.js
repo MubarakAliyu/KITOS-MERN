@@ -6,6 +6,7 @@ import { connectDb, disconnectDb } from "./config/db.js";
 import { logger } from "./lib/logger.js";
 import { loadPermissionOverrides } from "./services/settings.service.js";
 import { startReminderJob, stopReminderJob } from "./jobs/reminders.js";
+import { attachRealtime, detachRealtime } from "./realtime/socket.js";
 import "./models/index.js";
 
 /**
@@ -27,7 +28,9 @@ async function main() {
   // matters on Render's free tier, where the service does sleep.
   startReminderJob();
 
-  // Socket.IO attaches to this same server in Batch 3 (PRD §7.1).
+  // Socket.IO shares this HTTP server (PRD §7.1), so one Render web service
+  // carries both the API and the chat — which the free tier requires.
+  const io = attachRealtime(server);
 
   server.listen(env.PORT, () => {
     logger.info(
@@ -55,6 +58,11 @@ async function main() {
     force.unref();
 
     stopReminderJob();
+    // Close the sockets before the server, or `server.close` waits on every
+    // open connection and the forced exit above is what ends the process.
+    await detachRealtime(io).catch((err) =>
+      logger.error({ err }, "Error closing Socket.IO")
+    );
 
     server.close(async (err) => {
       if (err) logger.error({ err }, "Error closing HTTP server");

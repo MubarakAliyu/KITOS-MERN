@@ -20,6 +20,7 @@ import {
   admissionCounterKey,
   ensureSequenceAtLeast,
   formatAdmissionSequence,
+  nextReceiptNumber,
 } from "../lib/numbering.js";
 import {
   CONSENT_CURRENT_VERSION,
@@ -39,6 +40,8 @@ import {
   MODULES,
   ENROLMENTS,
   SESSIONS,
+  PAYMENTS,
+  SUBSCRIPTIONS,
 } from "./courses.js";
 import { Course } from "../models/Course.js";
 import { Module } from "../models/Module.js";
@@ -53,6 +56,11 @@ import { Certificate } from "../models/Certificate.js";
 import { Session } from "../models/Session.js";
 import { Attendance } from "../models/Attendance.js";
 import { Recording } from "../models/Recording.js";
+import { Conversation } from "../models/Conversation.js";
+import { Message } from "../models/Message.js";
+import { Announcement } from "../models/Announcement.js";
+import { Payment } from "../models/Payment.js";
+import { Subscription } from "../models/Subscription.js";
 import { nairaToKobo } from "../lib/serialize.js";
 import { recalculateProgress } from "../services/progress.service.js";
 import { issueCertificate } from "../services/enrollment.service.js";
@@ -154,7 +162,41 @@ async function clearCollections() {
     Session.deleteMany({}),
     Attendance.deleteMany({}),
     Recording.deleteMany({}),
+    Conversation.deleteMany({}),
+    Message.deleteMany({}),
+    Announcement.deleteMany({}),
+    Payment.deleteMany({}),
+    Subscription.deleteMany({}),
   ]);
+}
+
+/**
+ * Writes a document's `created_at` to a past date.
+ *
+ * Through the raw driver on purpose. `created_at` comes from the schema's
+ * timestamps option, which marks it immutable, so a Mongoose `$set` on it is
+ * silently discarded — no error, no change. Seeded history that all lands in
+ * the current month makes the revenue chart and the chat transcript look
+ * wrong in a way that is easy to miss and hard to explain.
+ */
+/**
+ * A date `monthsAgo` months back, mid-month and mid-morning.
+ *
+ * Mid-month on purpose: the 1st at midnight falls on a boundary where the
+ * Lagos and UTC months disagree, and every chart buckets in Lagos.
+ */
+function monthsBack(monthsAgo) {
+  const now = new Date();
+  const date = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 14);
+  date.setHours(10, 30, 0, 0);
+  return date;
+}
+
+async function backdate(Model, id, when) {
+  await Model.collection.updateOne(
+    { _id: id },
+    { $set: { created_at: when } }
+  );
 }
 
 export async function runSeed({ quiet = false } = {}) {
@@ -163,12 +205,13 @@ export async function runSeed({ quiet = false } = {}) {
   const passwords = resolvePasswords();
   const hashes = await hashAll(passwords);
 
-  say("Clearing the Batch 1 collections…");
+  say("Clearing the seeded collections…");
   await clearCollections();
 
   // ── Cohorts (before students, which reference them) ──────────────────────
   const cohortIds = new Map();
   const instructorIds = new Map();
+  const adminIds = new Map();
 
   // ── Staff and parents ────────────────────────────────────────────────────
   say("Creating staff and parent accounts…");
@@ -182,6 +225,7 @@ export async function runSeed({ quiet = false } = {}) {
       must_reset_password: Boolean(admin.must_reset_password),
       is_active: true,
     });
+    adminIds.set(admin.key, user._id);
     if (admin.key === "amina") instructorIds.set("amina", user._id);
   }
 
@@ -277,7 +321,12 @@ export async function runSeed({ quiet = false } = {}) {
       await profile.save();
     }
 
-    createdStudents.push({ admissionNo, profileId: profile._id, ...student });
+    createdStudents.push({
+      admissionNo,
+      profileId: profile._id,
+      userId: user._id,
+      ...student,
+    });
   }
 
   // Move the counter past the hand-written numbers, so the first
@@ -376,7 +425,7 @@ export async function runSeed({ quiet = false } = {}) {
     const courseId = courseIds.get(entry.course);
     if (!studentId || !courseId) continue;
 
-    await Enrollment.create({
+    const enrolment = await Enrollment.create({
       student_id: studentId,
       course_id: courseId,
       status: "active",
@@ -384,6 +433,12 @@ export async function runSeed({ quiet = false } = {}) {
       progress: 0,
       last_activity_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
     });
+
+    // The analytics trend line buckets on this, so a whole intake dated
+    // today draws nothing followed by a vertical jump.
+    if (entry.monthsAgo !== undefined) {
+      await backdate(Enrollment, enrolment._id, monthsBack(entry.monthsAgo));
+    }
 
     const lessons = lessonsByCourse.get(String(courseId)) ?? [];
 
@@ -500,6 +555,201 @@ export async function runSeed({ quiet = false } = {}) {
     }
   }
 
+  // ── Payments and subscriptions ───────────────────────────────────────────
+  say("Recording payments…");
+
+  let receiptsIssued = 0;
+
+  for (const entry of PAYMENTS) {
+    const courseId = courseIds.get(entry.course);
+    const course = COURSES.find((c) => c.key === entry.course);
+    const studentProfileId = studentIdByKey.get(entry.student);
+    const studentFixture = STUDENTS.find((st) => st.key === entry.student);
+    const parentUserId = parentIds.get(entry.parent);
+    const createdAt = monthsBack(entry.monthsAgo);
+
+    if (!courseId || !studentProfileId || !parentUserId) {
+      // A fixture naming a key that does not exist is a typo in the seed
+      // data, and skipping it quietly is how a demo ends up missing the
+      // pending and failed rows nobody notices are absent.
+      throw new Error(
+        `PAYMENTS fixture references something that does not exist: ` +
+          `parent "${entry.parent}", student "${entry.student}", course "${entry.course}"`
+      );
+    }
+
+    const paid = entry.status === "paid";
+    const payment = await Payment.create({
+      tx_ref: `KIT-SEED-${String(receiptsIssued + 1).padStart(4, "0")}`,
+      parent_id: parentUserId,
+      student_id: studentProfileId,
+      course_id: courseId,
+      parent_name: PARENTS.find((pa) => pa.key === entry.parent)?.name ?? "",
+      student_name: studentFixture?.name ?? "",
+      student_admission_no:
+        createdStudents.find((st) => st.key === entry.student)?.admissionNo ?? null,
+      course_title: course?.title ?? "",
+      // From the course, exactly as a real payment's is.
+      amount_kobo: nairaToKobo(course?.price ?? 0),
+      type: entry.type,
+      status: entry.status,
+      // Receipt numbers only exist for money that arrived.
+      receipt_no: paid ? await nextReceiptNumber({ now: createdAt }) : null,
+      paid_at: paid ? createdAt : null,
+      confirmed_via: paid ? "simulated" : null,
+      gateway_response: paid
+        ? "Simulated approval (seeded demonstration data)"
+        : entry.status === "failed"
+          ? "Declined by issuer (seeded demonstration data)"
+          : null,
+    });
+    if (paid) receiptsIssued += 1;
+
+    // The revenue chart buckets on `created_at`, and the schema's timestamps
+    // option marks it immutable — a Mongoose `$set` on it is silently
+    // dropped, which is how every seeded payment first ended up in the
+    // current month. The raw driver writes it for real.
+    await backdate(Payment, payment._id, createdAt);
+  }
+
+  for (const entry of SUBSCRIPTIONS) {
+    const courseId = courseIds.get(entry.course);
+    const course = COURSES.find((c) => c.key === entry.course);
+    const studentProfileId = studentIdByKey.get(entry.student);
+    const parentUserId = parentIds.get(entry.parent);
+    if (!courseId || !studentProfileId || !parentUserId) {
+      throw new Error(
+        `SUBSCRIPTIONS fixture references something that does not exist: ` +
+          `parent "${entry.parent}", student "${entry.student}", course "${entry.course}"`
+      );
+    }
+
+    const start = monthsBack(entry.monthsAgo);
+    await Subscription.create({
+      parent_id: parentUserId,
+      student_id: studentProfileId,
+      course_id: courseId,
+      student_name: STUDENTS.find((st) => st.key === entry.student)?.name ?? "",
+      course_title: course?.title ?? "",
+      amount_kobo: nairaToKobo(course?.price ?? 0),
+      interval: "monthly",
+      status: "active",
+      start_date: start,
+      next_billing: monthsBack(-1),
+    });
+  }
+
+  // ── Chat ─────────────────────────────────────────────────────────────────
+  // Two threads, both of them allowed pairs (PRD §10): a pupil with the
+  // instructor who teaches them, and a parent with an administrator. The
+  // pupil's thread carries their parent as an observer, which is the rule the
+  // chat screens demonstrate — a parent reads their child's conversations
+  // without being able to write in them.
+  say("Creating conversations…");
+
+  const studentUserIds = new Map(
+    createdStudents.map((entry) => [entry.key, entry.userId])
+  );
+
+  let messagesSeeded = 0;
+
+  async function seedThread({ participants, observers = [], messages }) {
+    const conversation = await Conversation.create({
+      participant_ids: participants,
+      observer_ids: observers,
+    });
+
+    let last = null;
+    const unread = new Map();
+
+    for (const entry of messages) {
+      const createdAt = new Date(Date.now() - entry.minutesAgo * 60 * 1000);
+      const receiver = participants.find(
+        (id) => String(id) !== String(entry.from)
+      );
+
+      // `created_at` is managed by the schema's timestamps, so it is set
+      // explicitly after create — a seeded transcript that all arrived in the
+      // same millisecond would sort arbitrarily.
+      const message = await Message.create({
+        conversation_id: conversation._id,
+        sender_id: entry.from,
+        receiver_id: receiver,
+        message: entry.text,
+        read: entry.read ?? true,
+      });
+      await backdate(Message, message._id, createdAt);
+      messagesSeeded += 1;
+
+      if (!(entry.read ?? true)) {
+        unread.set(String(receiver), (unread.get(String(receiver)) ?? 0) + 1);
+      }
+      last = { text: entry.text, at: createdAt, from: entry.from };
+    }
+
+    conversation.last_message = last?.text?.slice(0, 200) ?? "";
+    conversation.last_message_at = last?.at ?? null;
+    conversation.last_sender_id = last?.from ?? null;
+    conversation.unread = unread;
+    await conversation.save();
+
+    return conversation;
+  }
+
+  const liamUserId = studentUserIds.get("liam");
+  const sarahUserId = instructorIds.get("sarah");
+  const fatimaUserId = parentIds.get("fatima");
+  const adminUserId = adminIds.get("admin");
+
+  if (liamUserId && sarahUserId) {
+    await seedThread({
+      participants: [liamUserId, sarahUserId],
+      observers: fatimaUserId ? [fatimaUserId] : [],
+      messages: [
+        {
+          from: liamUserId,
+          text: "Hi Ms. Sarah! How are you finding the Scratch course so far?",
+          minutesAgo: 180,
+        },
+        {
+          from: sarahUserId,
+          text: "Hi Liam! I am really enjoying teaching it. How about you?",
+          minutesAgo: 175,
+        },
+        {
+          from: liamUserId,
+          text: "I love the animations module! I built a cat chasing a mouse.",
+          minutesAgo: 170,
+        },
+        {
+          from: sarahUserId,
+          text: "That sounds amazing! Great work on your last assignment.",
+          minutesAgo: 90,
+          read: false,
+        },
+      ],
+    });
+  }
+
+  if (fatimaUserId && adminUserId) {
+    await seedThread({
+      participants: [fatimaUserId, adminUserId],
+      messages: [
+        {
+          from: fatimaUserId,
+          text: "Hello, I have a question about the enrolment fees.",
+          minutesAgo: 240,
+        },
+        {
+          from: adminUserId,
+          text: "Hello Mrs. Hassan! Happy to help. What would you like to know?",
+          minutesAgo: 235,
+          read: false,
+        },
+      ],
+    });
+  }
+
   // ── Settings ─────────────────────────────────────────────────────────────
   say("Writing platform settings…");
   await Setting.create({ key: "platform", ...SETTINGS, permissions: [] });
@@ -527,6 +777,11 @@ export async function runSeed({ quiet = false } = {}) {
     enrolments: ENROLMENTS.length,
     sessions: SESSIONS.length,
     certificates: certificatesIssued,
+    payments: PAYMENTS.length,
+    receipts: receiptsIssued,
+    subscriptions: SUBSCRIPTIONS.length,
+    conversations: await Conversation.countDocuments({}),
+    messages: messagesSeeded,
     firstAdmission: createdStudents[0]?.admissionNo,
     lastAdmission: createdStudents.at(-1)?.admissionNo,
     passwordSource: passwords.source,
@@ -581,6 +836,8 @@ async function main() {
     console.log(`  Enrolments:  ${summary.enrolments}`);
     console.log(`  Sessions:    ${summary.sessions}`);
     console.log(`  Certificates: ${summary.certificates}`);
+    console.log(`  Payments:    ${summary.payments} (${summary.receipts} receipts, ${summary.subscriptions} subscriptions)`);
+    console.log(`  Conversations: ${summary.conversations} (${summary.messages} messages)`);
     console.log(`  Passwords:   ${summary.passwordSource}`);
 
     if (!isProduction()) {

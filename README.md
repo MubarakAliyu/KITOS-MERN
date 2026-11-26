@@ -11,8 +11,31 @@ consent built into the server rather than bolted onto the interface.
 
 It is also the case study for the GoMyCode MSc checkpoint **Cloud-Based Web System Design**.
 
-> **Status.** Batch 1 of 3 is complete: the backend foundation, identity, families and brand.
-> Learning content and sessions arrive in Batch 2; real-time chat, payments and deployment in Batch 3.
+## Submission
+
+| | |
+|---|---|
+| **Live URL** | _pending deployment_ — the Vercel project URL goes here |
+| **API URL** | _pending deployment_ — the Render service URL goes here |
+| **Repository** | https://github.com/MubarakAliyu/KITOS-MERN |
+| **Checkpoint** | GoMyCode MSc Software Engineering — *Cloud-Based Web System Design* |
+| **Report** | [`docs/REPORT-SUBMISSION.md`](docs/REPORT-SUBMISSION.md) |
+| **Demo script** | [`docs/DEMO-SCRIPT.md`](docs/DEMO-SCRIPT.md) |
+
+**Demo accounts.** The deployed site is seeded with one account per role — administrator,
+instructor, parent and student. The student signs in with an **admission number**
+(`KIT/26/001`), not an email, because children on this platform are not required to have one.
+Credentials are supplied with the submission rather than printed here: the demo administrator can
+read every child's record, so they do not belong in a public repository.
+
+**First load takes 30–50 seconds.** The API is on Render's free tier and sleeps after about fifteen
+minutes idle; the site shows a "Waking the server…" notice while it wakes. Every request after that
+is normal.
+
+> **Status.** All three batches are built. Batch 3 — real-time chat, payments, admin analytics and
+> deployment preparation — is complete in code and **not yet deployed**: that needs accounts only
+> the author can create. [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) has the remaining steps and a
+> 25-row production test report, with every row left ⏳ until it has actually been run.
 > See [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
 ---
@@ -50,7 +73,7 @@ conventions (ADR-003).
 ```
 KITOS-MERN/
 ├── client/              Next.js frontend — retained design, see client/README.md
-│   ├── e2e/             Playwright smoke tests with axe
+│   ├── e2e/             Playwright: smoke, journeys, and axe over every screen
 │   ├── public/brand/    KIT and StarNova logo files (built, not hand-made)
 │   ├── scripts/         prepare-brand, screenshots, certcheck, layoutcheck
 │   └── src/
@@ -75,7 +98,7 @@ services never see `req`, so every rule is testable without an HTTP layer.
 
 ## Running it locally
 
-Node 22 and npm. Nothing else — no Atlas account, no SMTP, no Paystack keys.
+Node 22 and npm. Nothing else — no Atlas account, no SMTP, no Flutterwave keys.
 
 ```bash
 npm --prefix server install
@@ -160,16 +183,23 @@ In `client/`: `npm run brand` rebuilds `public/brand/` from the master logo file
 ## Testing
 
 ```bash
-npm test                              # 325 server tests
-npm --prefix client run test:e2e      # smoke + axe, desktop and Pixel 7
+npm test                                   # 542 server tests
+npm --prefix server run test:coverage      # coverage; services are at 85%
+npm --prefix client run test:e2e           # smoke, journeys and axe — desktop and Pixel 7
+npm --prefix client run axe:sweep          # the accessibility census, grouped by cause
+npm --prefix client run lighthouse         # against a production build; see the script's note
 ```
 
-The server suite starts its own in-memory MongoDB replica set, so it needs nothing running. It covers
+The server suite starts its own in-memory MongoDB replica set, so it needs nothing running — and it
+is a replica set rather than a standalone so that transactions behave as they do on Atlas. It covers
 sign-in by both identifiers, the forced-reset flow, forged `alg:none` and tampered tokens, expiry,
-revocation after a password change or deactivation, the permission matrix against every role, ownership
-checks, admission-number uniqueness under 50 parallel creates, and Mongo operator injection.
+revocation after a password change or deactivation, the permission matrix against every role,
+ownership checks, admission-number uniqueness under 50 parallel creates, Mongo operator injection,
+the chat allow-list pair by pair, socket handshake rejection, webhook authentication, and a payment
+confirmed twice at once.
 
-The end-to-end suite needs the stack running and exercises the real API, not mocks.
+The end-to-end suite needs the stack running and exercises the real API, not mocks. Point it at a
+deployed site with `E2E_BASE_URL` and `E2E_API_URL`.
 
 ## Security and child safety
 
@@ -183,7 +213,9 @@ The end-to-end suite needs the stack running and exercises the real API, not moc
 - Zod on every input; MongoDB operator keys stripped before anything reaches a query.
 - A child's account is `pending` until a parent's consent is recorded, and a pending child cannot sign
   in. The consent row keeps the version, scopes, time, IP and user agent as evidence.
-- No email address is required of a student. No student-to-student chat (Batch 3).
+- No email address is required of a student. **Student-to-student chat is refused by the API** with
+  403 — an allow-list of role pairs re-checked on every send, not a hidden button. A parent reads
+  their child's conversations and cannot write in them.
 - Every admin mutation and security event writes an append-only `activity_logs` row.
 - Secrets only in the environment. `npm audit --omit=dev` reports zero vulnerabilities.
 
@@ -203,12 +235,31 @@ Where the PRD and a batch prompt disagree, the PRD wins, and the conflict is rec
 
 ## Known limitations
 
-- Batches 2 and 3 are not built. Screens that need them render their empty states against endpoints
-  that return empty, correctly shaped data (ADR-018).
-- Nine colour pairings in the brand palette fail WCAG AA contrast. The product owner has decided the
-  emerald palette stands, so this is an accepted, documented exception (ADR-020) — not an open
-  defect. The exemption is a fixed list matched by exact colour, so new violations still fail CI.
-- Paystack runs in test mode only.
+Measured, not estimated. The longer versions are in
+[`docs/PROGRESS.md`](docs/PROGRESS.md) and [`docs/DECISIONS.md`](docs/DECISIONS.md).
+
+- **Not yet deployed.** Everything is built; the hosting needs accounts only the author can
+  create. [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) lists the remaining steps, and its 25-row
+  production test report is entirely ⏳ — no row is ticked that has not been run.
+- **Payments run in Flutterwave test mode** (ADR-036). No real money moves. With no key configured
+  the gateway simulates, so the four-step flow works offline and in CI with no account, and such a
+  receipt says "DEMONSTRATION PAYMENT" on its face.
+- **The light theme does not meet WCAG AA for text contrast** (ADR-037). It had never been scanned
+  until Batch 3; the full sweep found about 330 failing nodes across 47 colour pairs. The cause is
+  structural — text sits on pale tints of the brand colours, where even `--text-secondary` falls to
+  4.33:1 — so it needs a palette decision rather than a patch, and the product owner has kept the
+  retained design. Contrast is therefore enforced on the dark theme, which is the default and
+  passes; the light theme is still checked for every other serious and critical rule. Reproduce the
+  census with `npm run axe:sweep`.
+- **The brand palette carries documented contrast exemptions** (ADR-020, ADR-029, ADR-037) — chiefly
+  white on the emerald `#10B981` at 2.53:1. Accepted brand decisions, matched by exact colour pair
+  per node, so anything else still fails CI.
+- **Hausa ships unreviewed** by a native speaker (ADR-034) and covers interface chrome only. English
+  is the default.
+- **The free tier sleeps.** The first request after ~15 minutes idle takes 30–50 seconds; the client
+  shows a "Waking the server…" notice so it reads as a cold start rather than a hang.
+- **Socket.IO runs on a single instance.** A second would need a Redis adapter, or chat would reach
+  only the users connected to the same one.
 
 ## Licence and credits
 

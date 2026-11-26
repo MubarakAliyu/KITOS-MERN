@@ -76,6 +76,16 @@ export function createApp() {
     })
   );
 
+  /**
+   * No raw-body parser for the webhook.
+   *
+   * Paystack signed its webhooks with an HMAC over the exact bytes, so the
+   * route had to see them before `express.json` consumed the stream.
+   * Flutterwave instead sends a static `verif-hash` header (ADR-036), which
+   * is independent of the body — so ordinary JSON parsing is correct here,
+   * and the body is in any case never trusted: the webhook re-verifies
+   * against the API before anything is marked paid.
+   */
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 

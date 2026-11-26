@@ -101,7 +101,12 @@ function Detail({ session, attendance }) {
             {attendance.attended_count} of {attendance.enrolled_count} students{" "}
             <span style={{ color: pctColor(attendance.attendance_pct) }}>({attendance.attendance_pct}%)</span>
           </p>
-          <div className="overflow-x-auto rounded-xl border border-[var(--border-color)]">
+          <div
+      role="region"
+      aria-label="Attendance"
+      tabIndex={0}
+      className="overflow-x-auto rounded-xl border border-[var(--border-color)]"
+    >
             <table className="w-full min-w-[420px] text-sm">
               <thead className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] text-left text-xs uppercase tracking-wider text-[var(--text-muted)] font-mono-ui">
                 <tr>

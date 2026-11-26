@@ -1,18 +1,14 @@
 import { test, expect } from "@playwright/test";
-import {
-  ACCOUNTS,
-  signIn,
-  openSidebar,
-  collectErrors,
-  expectNoSeriousAxeViolations,
-} from "./helpers.js";
+import { ACCOUNTS, signIn, openSidebar, collectErrors } from "./helpers.js";
 
 /**
  * Batch 1 smoke tests (AC1.1, AC1.5, AC1.7).
  *
  * Each role signs in against the real API and lands on its dashboard with no
- * console errors; the brand additions are present in both themes; and axe
- * finds nothing serious or critical on the sign-in page or any dashboard home.
+ * console errors, and the brand additions are present in both themes.
+ *
+ * Accessibility moved to `a11y.spec.js` in Batch 3, where it covers every
+ * role's main screens in both themes rather than the dashboards alone.
  */
 
 test.describe("sign-in", () => {
@@ -116,36 +112,39 @@ test.describe("brand", () => {
   });
 });
 
-test.describe("accessibility", () => {
-  test("the sign-in page has no serious or critical axe violations", async ({ page }) => {
-    await page.goto("/login");
-    await page.waitForLoadState("networkidle");
-
-    await expectNoSeriousAxeViolations(page, "/login");
-  });
-
-  for (const role of Object.keys(ACCOUNTS)) {
-    test(`the ${role} dashboard has no serious or critical axe violations`, async ({
-      page,
-    }) => {
-      await signIn(page, role);
-      await page.waitForLoadState("networkidle");
-
-      await expectNoSeriousAxeViolations(page, `${role} dashboard`);
-    });
-  }
-});
-
-test.describe("screens awaiting later batches", () => {
+test.describe("every sidebar screen renders", () => {
   /**
-   * AC1.1: screens whose endpoints arrive in Batch 2 or 3 must show their
-   * empty state rather than crashing.
+   * AC1.1, still worth keeping now that the endpoints behind these screens
+   * exist. It was written to prove an empty state did not crash; it now
+   * proves a populated one does not either, which is the harder case — these
+   * screens render tables, charts and transcripts from real seeded data.
+   *
+   * The assertion is deliberately shallow (something rendered, no error
+   * screen, no console errors). `journeys.spec.js` is where behaviour is
+   * checked; this is the net that catches a screen that stopped loading at
+   * all.
    */
   const ROUTES = {
-    student: ["/student/courses", "/student/assignments", "/student/certificates"],
+    student: [
+      "/student/courses",
+      "/student/assignments",
+      "/student/sessions",
+      "/student/certificates",
+    ],
     parent: ["/parent/children", "/parent/payments"],
-    instructor: ["/instructor/courses", "/instructor/students"],
-    admin: ["/admin/users", "/admin/courses", "/admin/analytics", "/admin/payments"],
+    instructor: [
+      "/instructor/courses",
+      "/instructor/students",
+      "/instructor/sessions",
+    ],
+    admin: [
+      "/admin/users",
+      "/admin/courses",
+      "/admin/analytics",
+      "/admin/payments",
+      "/admin/sessions",
+      "/admin/settings",
+    ],
   };
 
   for (const [role, routes] of Object.entries(ROUTES)) {

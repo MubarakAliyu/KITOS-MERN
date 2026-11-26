@@ -85,6 +85,7 @@ export default function InstructorStudentsPage() {
           />
         </div>
         <select
+          aria-label="Filter by course"
           value={courseFilter}
           onChange={(e) => setCourseFilter(e.target.value)}
           className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2.5 text-sm text-[var(--text-primary)] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/20"
@@ -109,7 +110,12 @@ export default function InstructorStudentsPage() {
       ) : visible.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]">
+        <div
+      role="region"
+      aria-label="Students"
+      tabIndex={0}
+      className="overflow-x-auto rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)]"
+    >
           <table className="w-full min-w-[840px] text-sm">
             <thead className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
               <tr>

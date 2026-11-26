@@ -247,6 +247,8 @@ export const sendNotificationBody = z
     link: z.string().trim().max(300).nullish(),
     audience: z.enum(["all", "role", "course"]).optional(),
     target: z.string().trim().max(60).nullish(),
+    /** Batch 3: a course audience reaches its pupils, their parents and its instructor. */
+    course_id: objectIdSchema.optional(),
     // adminNotify.js sends an arbitrary event payload alongside the copy.
     priority: z.boolean().optional(),
   })
@@ -471,4 +473,115 @@ export const verifyCodeParam = z.object({
     .string()
     .trim()
     .regex(/^[A-Za-z0-9]{6,16}$/, "That does not look like a verification code"),
+});
+
+// ── Batch 3: chat, notifications, payments and admin ────────────────────────
+
+export const listConversationsQuery = z.object({
+  /**
+   * The retained client appends `?user_id=` because the mock handlers were
+   * keyed that way. The service ignores it for anyone but an admin — a
+   * conversation list is private, and honouring it would let one pupil read
+   * another's by guessing an id.
+   */
+  user_id: z.string().trim().max(64).optional(),
+});
+
+export const listMessagesQuery = z.object({
+  conversation_id: objectIdSchema,
+});
+
+export const sendMessageBody = z
+  .object({
+    conversation_id: objectIdSchema.optional(),
+    /** Ignored: the sender is whoever holds the token. */
+    sender_id: z.string().trim().max(64).optional(),
+    receiver_id: objectIdSchema.optional(),
+    message: z.string().max(4000).optional(),
+    file_url: z.string().trim().max(500).nullish(),
+    file_type: z.string().trim().max(60).nullish(),
+  })
+  .strict()
+  .refine((body) => body.conversation_id || body.receiver_id, {
+    message: "A conversation or a recipient is required",
+    path: ["conversation_id"],
+  });
+
+export const markReadBody = z
+  .object({ conversation_id: objectIdSchema })
+  .strict();
+
+export const reportConversationBody = z
+  .object({
+    conversation_id: objectIdSchema,
+    reason: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+// ── Payments ────────────────────────────────────────────────────────────────
+
+export const initiatePaymentBody = z
+  .object({
+    student_id: objectIdSchema,
+    course_id: objectIdSchema,
+    type: z.enum(["subscription", "one_time"]).optional(),
+    /**
+     * Accepted for shape compatibility with the retained modal and then
+     * ignored: the amount comes from the course, never from the browser.
+     */
+    amount: z.coerce.number().optional(),
+    parent_id: z.string().trim().max(64).optional(),
+    parent_name: z.string().trim().max(120).optional(),
+    student_name: z.string().trim().max(120).optional(),
+    course_title: z.string().trim().max(200).optional(),
+  })
+  .strict();
+
+export const verifyPaymentBody = z
+  .object({
+    reference: z.string().trim().min(4, "A payment reference is required").max(120),
+    student_id: objectIdSchema.optional(),
+    course_id: objectIdSchema.optional(),
+    type: z.enum(["subscription", "one_time"]).optional(),
+    amount: z.coerce.number().optional(),
+    parent_id: z.string().trim().max(64).optional(),
+    parent_name: z.string().trim().max(120).optional(),
+    student_name: z.string().trim().max(120).optional(),
+    course_title: z.string().trim().max(200).optional(),
+  })
+  .strict();
+
+export const listPaymentsQuery = z.object({
+  parent_id: z.string().trim().max(64).optional(),
+  student_id: z.string().trim().max(64).optional(),
+  status: z.enum(["all", "pending", "paid", "failed"]).optional(),
+  type: z.enum(["all", "subscription", "one_time"]).optional(),
+  q: z.string().trim().max(120).optional(),
+  from: z.string().trim().max(40).optional(),
+  to: z.string().trim().max(40).optional(),
+});
+
+export const cancelSubscriptionBody = z
+  .object({ plan_id: objectIdSchema })
+  .strict();
+
+export const receiptQuery = z.object({
+  format: z.enum(["json", "pdf"]).optional(),
+});
+
+// ── Admin analytics and audit ───────────────────────────────────────────────
+
+export const activityLogQuery = z.object({
+  // `paginationQuery` is a field map to spread, not a schema to extend.
+  ...paginationQuery,
+  action: z.string().trim().max(60).optional(),
+  actor_role: z.enum([...ROLES, "system"]).optional(),
+  target_type: z.string().trim().max(60).optional(),
+  from: z.string().trim().max(40).optional(),
+  to: z.string().trim().max(40).optional(),
+});
+
+export const analyticsQuery = z.object({
+  /** How many months of history the charts cover; the UI shows six. */
+  months: z.coerce.number().int().min(1).max(24).optional(),
 });

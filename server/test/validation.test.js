@@ -4,6 +4,7 @@ import rateLimit from "express-rate-limit";
 import express from "express";
 import { app, makeUser, auth, resetState, PASSWORD } from "./helpers.js";
 import { sanitizeValue } from "../src/middleware/sanitizeKeys.js";
+import { cloudinaryProvider } from "../src/lib/storage.js";
 import { User } from "../src/models/User.js";
 import { Setting } from "../src/models/Setting.js";
 import { parseEnv } from "../src/config/env.js";
@@ -57,6 +58,36 @@ describe("validation errors", () => {
 });
 
 describe("Mongo operator sanitising", () => {
+  /**
+   * A Buffer is an object, and the first version of this check treated it as
+   * a plain one: `Object.entries` walked its bytes and handed back
+   * `{0: 12, 1: 34, …}`. That silently destroyed the raw request body a
+   * webhook signature was computed over, so a correctly signed webhook was
+   * rejected — and every "bad signature" test passed for the wrong reason.
+   *
+   * No route needs a raw body today (ADR-036: the gateway authenticates with
+   * a header instead), so this guards nothing in production right now. It
+   * stays because the bug was invisible from the outside, and the next raw
+   * body — an upload, another provider — would hit it just as quietly.
+   */
+  it("leaves a Buffer alone instead of unpacking it into a byte map", () => {
+    const raw = Buffer.from('{"event":"charge.completed"}', "utf8");
+
+    const { value, removed } = sanitizeValue(raw);
+
+    expect(Buffer.isBuffer(value)).toBe(true);
+    expect(value.toString("utf8")).toBe('{"event":"charge.completed"}');
+    expect(removed).toEqual([]);
+  });
+
+  it("leaves other non-plain objects intact", () => {
+    const date = new Date("2026-01-01T00:00:00.000Z");
+    const { value } = sanitizeValue({ when: date, bytes: Buffer.from("hi") });
+
+    expect(value.when).toBe(date);
+    expect(Buffer.isBuffer(value.bytes)).toBe(true);
+  });
+
   it("strips $-prefixed and dotted keys at any depth", () => {
     const { value, removed } = sanitizeValue({
       email: "ok@kit.test",
@@ -197,6 +228,49 @@ describe("environment validation", () => {
 
   it("refuses a CLIENT_ORIGIN that is not a URL", () => {
     expect(() => parseEnv({ ...valid, CLIENT_ORIGIN: "not a url" })).toThrow();
+  });
+});
+
+/**
+ * Only the delivery URL is stored against a submission, so deleting an asset
+ * means recovering its public id from that URL. Getting this wrong deletes
+ * the wrong asset or nothing at all, and neither is visible until someone
+ * tries it in production.
+ */
+describe("the Cloudinary provider's public ids", () => {
+  const cases = [
+    [
+      "https://res.cloudinary.com/kit/image/upload/v1699123/submissions/abc-work.pdf",
+      "submissions/abc-work",
+    ],
+    // No version segment.
+    [
+      "https://res.cloudinary.com/kit/raw/upload/submissions/abc-work.sb3",
+      "submissions/abc-work",
+    ],
+    // Nested folders survive; only the extension is dropped.
+    [
+      "https://res.cloudinary.com/kit/image/upload/v1/a/b/c/file.name.png",
+      "a/b/c/file.name",
+    ],
+  ];
+
+  for (const [url, expected] of cases) {
+    it(`reads ${expected} out of its URL`, () => {
+      expect(cloudinaryProvider.publicIdFromUrl(url)).toBe(expected);
+    });
+  }
+
+  it("declines anything that is not a Cloudinary URL", () => {
+    for (const url of [
+      "/uploads/local-file.pdf",
+      "https://www.youtube.com/watch?v=abc",
+      "https://example.com/upload/v1/thing.png",
+      "",
+      null,
+    ]) {
+      expect(cloudinaryProvider.publicIdFromUrl(url)).toBeNull();
+    }
   });
 });
 

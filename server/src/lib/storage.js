@@ -15,8 +15,9 @@ import { badRequest } from "./errors.js";
  * uses `cloudinary`, and `config/env.js` refuses to start if it is selected
  * without a `CLOUDINARY_URL`.
  *
- * The Cloudinary provider is written and unit-tested here but only switched
- * on in Batch 3, when the account exists.
+ * Both providers are complete. Which one is in force is decided by
+ * `STORAGE_PROVIDER` at call time, so a deployment switches between them
+ * without a code change.
  */
 
 const UPLOADS_DIR = path.join(LOCAL_DIR, "uploads");
@@ -177,10 +178,64 @@ const cloudinaryProvider = {
     };
   },
 
+  /**
+   * Cloudinary's public id, recovered from a delivery URL.
+   *
+   * Only the `secure_url` is stored against a submission, and destroying an
+   * asset needs its public id — which is the path after the version segment,
+   * without the extension:
+   *
+   *   https://res.cloudinary.com/<cloud>/image/upload/v1699/kit/abc-work.pdf
+   *                                                         └── kit/abc-work
+   *
+   * Returns null for anything that is not one of our Cloudinary URLs, so a
+   * local path or a YouTube link is declined rather than mangled.
+   */
+  publicIdFromUrl(url) {
+    const match = /\/upload\/(?:v\d+\/)?(.+)$/.exec(String(url ?? ""));
+    if (!match || !String(url).includes("res.cloudinary.com")) return null;
+
+    const withoutExtension = match[1].replace(/\.[a-z0-9]+$/i, "");
+    return withoutExtension || null;
+  },
+
   async remove(url) {
-    // Deleting needs the public_id rather than the URL; recorded as a Batch 3
-    // task alongside switching the provider on.
-    logger.warn({ url }, "Cloudinary delete is not wired up yet");
+    const publicId = this.publicIdFromUrl(url);
+    if (!publicId) {
+      logger.warn({ url }, "Not a Cloudinary URL; nothing to delete");
+      return false;
+    }
+
+    const { apiKey, apiSecret, cloudName } = this.parseUrl();
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = this.sign({ public_id: publicId, timestamp }, apiSecret);
+
+    const form = new FormData();
+    form.append("public_id", publicId);
+    form.append("api_key", apiKey);
+    form.append("timestamp", String(timestamp));
+    form.append("signature", signature);
+
+    // `auto` on upload can file an asset under image, video or raw, and
+    // destroy is per resource type — so each is tried until one owns it.
+    for (const resourceType of ["image", "video", "raw"]) {
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/destroy`,
+        { method: "POST", body: form }
+      ).catch(() => null);
+
+      if (!response?.ok) continue;
+
+      const result = await response.json().catch(() => ({}));
+      if (result.result === "ok") {
+        logger.info({ publicId, resourceType }, "Deleted a Cloudinary asset");
+        return true;
+      }
+    }
+
+    // Already gone is a success as far as the caller is concerned, which is
+    // the same contract the local provider offers.
+    logger.warn({ publicId }, "Cloudinary asset was not found to delete");
     return false;
   },
 };

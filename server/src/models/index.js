@@ -28,7 +28,9 @@ export { Session } from "./Session.js";
 export { Attendance } from "./Attendance.js";
 export { Recording } from "./Recording.js";
 
-/**
- * Batch 3 adds payments, subscriptions, conversations, messages and
- * announcements.
- */
+/** Batch 3 — chat, announcements and payments. */
+export { Conversation } from "./Conversation.js";
+export { Message } from "./Message.js";
+export { Announcement } from "./Announcement.js";
+export { Payment } from "./Payment.js";
+export { Subscription } from "./Subscription.js";

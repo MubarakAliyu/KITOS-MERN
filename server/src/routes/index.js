@@ -11,9 +11,9 @@ import {
   loginLimiter,
   forgotPasswordLimiter,
   passwordChangeLimiter,
+  messageLimiter,
 } from "../middleware/rateLimit.js";
 import * as s from "../validators/schemas.js";
-import { placeholderRouter } from "./placeholders.js";
 import { learningRouter } from "./learning.js";
 
 /**
@@ -163,7 +163,16 @@ router.get(
   "/admin/activity-log",
   authenticate,
   requirePermission("audit.view"),
+  validate({ query: s.activityLogQuery }),
   c.getActivityLog
+);
+
+router.get(
+  "/admin/analytics",
+  authenticate,
+  requirePermission("analytics.view"),
+  validate({ query: s.analyticsQuery }),
+  c.getAdminAnalytics
 );
 
 router.get(
@@ -283,9 +292,138 @@ router.post(
   c.postSendNotification
 );
 
+// ── Batch 3: chat ───────────────────────────────────────────────────────────
+// Who may talk to whom is decided in chat.service.js (PRD §10), not here: the
+// matrix grants `chat.use` to every role, and the pair rules narrow it.
+
+router.get(
+  "/conversations",
+  authenticate,
+  requirePermission("chat.use"),
+  validate({ query: s.listConversationsQuery }),
+  c.getConversations
+);
+
+/** Literal path before `/messages`, so it is not read as a query-less list. */
+router.put(
+  "/messages/read",
+  authenticate,
+  requirePermission("chat.use"),
+  validate({ body: s.markReadBody }),
+  c.putMessagesRead
+);
+
+router.get(
+  "/messages",
+  authenticate,
+  requirePermission("chat.use"),
+  validate({ query: s.listMessagesQuery }),
+  c.getMessages
+);
+
+router.post(
+  "/messages",
+  authenticate,
+  requirePermission("chat.use"),
+  messageLimiter,
+  validate({ body: s.sendMessageBody }),
+  c.postMessage
+);
+
+router.get(
+  "/chat/contacts",
+  authenticate,
+  requirePermission("chat.use"),
+  c.getContactable
+);
+
+router.post(
+  "/chat/report",
+  authenticate,
+  requirePermission("chat.use"),
+  validate({ body: s.reportConversationBody }),
+  c.postReportConversation
+);
+
+router.get(
+  "/admin/chat/all-conversations",
+  authenticate,
+  requirePermission("chat.monitor"),
+  c.getAllConversations
+);
+
+// ── Batch 3: payments (PRD §11.1) ───────────────────────────────────────────
+
+/**
+ * Public, and authenticated by the `verif-hash` header rather than by token:
+ * Flutterwave calls it, not a browser. It is deliberately not validated with
+ * Zod — the body is third-party and is never acted on, only read for the
+ * reference to re-verify against the API (ADR-036).
+ */
+router.post("/payments/webhook", c.postPaymentWebhook);
+
+router.post(
+  "/payments/initiate",
+  authenticate,
+  requirePermission("payment.make"),
+  validate({ body: s.initiatePaymentBody }),
+  c.postInitiatePayment
+);
+
+router.post(
+  "/payments/verify",
+  authenticate,
+  requirePermission("payment.make"),
+  validate({ body: s.verifyPaymentBody }),
+  c.postVerifyPayment
+);
+
+/** Literal paths before `/payments/:id/receipt`, so neither shadows the other. */
+router.get(
+  "/payments/stats",
+  authenticate,
+  requirePermission("payment.view"),
+  c.getPaymentStats
+);
+
+router.get(
+  "/payments/:id/receipt",
+  authenticate,
+  requirePermission("payment.view"),
+  validate({ params: idParamSchema, query: s.receiptQuery }),
+  c.getReceipt
+);
+
+router.get(
+  "/payments",
+  authenticate,
+  requirePermission("payment.view"),
+  validate({ query: s.listPaymentsQuery }),
+  c.getPayments
+);
+
+router.get(
+  "/subscriptions",
+  authenticate,
+  requirePermission("payment.view"),
+  c.getSubscriptions
+);
+
+router.post(
+  "/subscriptions/cancel",
+  authenticate,
+  requirePermission("payment.make"),
+  validate({ body: s.cancelSubscriptionBody }),
+  c.postCancelSubscription
+);
+
+router.get(
+  "/admin/payments",
+  authenticate,
+  requirePermission("analytics.view"),
+  validate({ query: s.listPaymentsQuery }),
+  c.getAdminPayments
+);
+
 // ── Batch 2: learning, assessment, certificates and sessions ────────────────
 router.use(learningRouter);
-
-// ── Batch 3 placeholders ────────────────────────────────────────────────────
-// Registered last so a real route above always wins. See routes/placeholders.js.
-router.use(placeholderRouter);

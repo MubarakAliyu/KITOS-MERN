@@ -117,15 +117,30 @@ export default function AdminAttendancePage() {
 
           {/* Filters */}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <select value={course} onChange={(e) => setCourse(e.target.value)} className={selectClass}>
+            <select
+              aria-label="Filter by course"
+              value={course}
+              onChange={(e) => setCourse(e.target.value)}
+              className={selectClass}
+            >
               <option value="">All Courses</option>
               {courseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={instructor} onChange={(e) => setInstructor(e.target.value)} className={selectClass}>
+            <select
+              aria-label="Filter by instructor"
+              value={instructor}
+              onChange={(e) => setInstructor(e.target.value)}
+              className={selectClass}
+            >
               <option value="">All Instructors</option>
               {instructorOptions.map((i) => <option key={i} value={i}>{i}</option>)}
             </select>
-            <select value={range} onChange={(e) => setRange(e.target.value)} className={selectClass}>
+            <select
+              aria-label="Filter by date range"
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+              className={selectClass}
+            >
               <option value="all">All time</option>
               <option value="month">This month</option>
               <option value="week">This week</option>
@@ -236,7 +251,12 @@ function SessionAttendanceCard({ report, index, open, onToggle }) {
             transition={{ duration: 0.22 }}
             className="overflow-hidden"
           >
-            <div className="mt-3 overflow-x-auto rounded-xl border border-[var(--border-color)]">
+            <div
+      role="region"
+      aria-label="Attendance by student"
+      tabIndex={0}
+      className="mt-3 overflow-x-auto rounded-xl border border-[var(--border-color)]"
+    >
               <table className="w-full min-w-[420px] text-sm">
                 <thead className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] text-left text-xs uppercase tracking-wider text-[var(--text-muted)] font-mono-ui">
                   <tr>

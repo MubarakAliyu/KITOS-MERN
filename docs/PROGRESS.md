@@ -5,9 +5,108 @@
 | Docs | main | ✅ Done | 17 Oct 2026 | Project report (Ch. 1–5), PRD, CLAUDE.md, LAB-PHASES, ADR-001–008, batch prompts |
 | 1 — Backend foundation, identity and brand | batch/01-foundation | ✅ Done | 23 Oct 2026 | Express 5 + MongoDB API, 8 models, 33 endpoints, 325 server tests, Playwright + axe, CI, KIT logo and StarNova attribution |
 | 2 — Learning core and hybrid sessions | batch/02-learning-sessions | ✅ Done | 3 Nov 2026 | Courses, modules, lessons, quizzes, assignments, progress, certificates with public verification, live and hybrid sessions with QR attendance and recordings; 21 models, 93 routes, 418 server tests, 46 end-to-end |
-| 3 — Real-time, payments, admin and deployment | batch/03-realtime-payments-deploy | ⏳ Not started | | |
+| 3 — Real-time, payments, admin and deployment | batch/03-realtime-payments-deploy | 🟡 Built, not yet deployed | 26 Nov 2026 | Socket.IO chat with the child-safety rules, Flutterwave payments confirmed exactly once, admin analytics and activity log, production hardening, render.yaml and the deployment guide; 26 models, 102 endpoints, **542 server tests**, accessibility across all 34 screens. Deployment itself needs the author's accounts |
 
 ## Log
+
+### Batch 3 — Real-time, payments, admin and deployment (26 Nov 2026)
+
+**What was built**
+
+The three things the platform still could not do: talk, take money, and be deployed.
+
+- **Chat over Socket.IO** — an **allow-list** of role pairs (ADR-030), re-checked in the service on
+  every send rather than only when a conversation opens. Student↔student is refused with 403, which
+  is the rule the product exists for. A parent reads their child's conversations and cannot write in
+  them: reading is the safeguarding requirement, writing as the child would be impersonation.
+  Handshakes verify the same token, the same expiry and the same token version as REST, so a
+  deactivated account's live socket loses the right to reconnect.
+- **Payments** — Flutterwave v3 test mode (ADR-036, replacing Paystack mid-batch). The amount comes
+  from the course and never from the request; the provider's reported amount must match it;
+  confirmation is one atomic `pending → paid` claim, so verify and the webhook racing produce one
+  receipt and one enrolment (AC3.3). The webhook re-verifies against the API rather than trusting
+  its body, because Flutterwave authenticates with a static header secret and not a body signature.
+- **Admin** — stats, five analytics series, the payments table and an append-only activity log, every
+  figure computed from the collections. `routes/placeholders.js` is **deleted**; nothing in the API
+  returns invented data any more.
+- **Production hardening** — nine high/critical client advisories cleared, a cold-start notice, the
+  Cloudinary delete finished, and a CI step asserting no component imports mock data.
+- **Deployment prepared** — `render.yaml` and `docs/DEPLOYMENT.md`, with a 25-row production test
+  report left entirely ⏳.
+
+**Measured**
+
+| | |
+|---|---|
+| Server tests | **542** across 11 files |
+| Coverage, `src/services` | **85.0% lines, 84.7% functions** (target ≥ 70%) |
+| Coverage, whole server | 87.9% lines, 82.5% functions |
+| Models / endpoints | 26 / 102 |
+| Lighthouse — production build, local, desktop | Performance **99**, Accessibility **92**, Best practices **100**, SEO 63 |
+| Lighthouse — live URL | pending deployment |
+| ADRs | 37 (ADR-036, ADR-037 new) |
+
+Lighthouse was measured against `npm run build && npm start`, **not** the dev server: `next dev`
+serves unminified bundles with React in development mode and scores about 20 points lower on
+Performance for reasons no amount of work on the code would change. `npm run lighthouse` warns if
+it is pointed at the dev port. The SEO score of 63 is **correct and deliberate** — the application
+sets `robots: index: false` throughout, because a children's learning platform should not be
+indexed.
+
+**Three defects found by widening the accessibility scan**
+
+Batch 3 took the axe sweep from four dashboard homes to all 34 main screens in both themes. That
+first full scan found three genuine defects the narrow one had never reached, all now fixed: seven
+filter dropdowns with no accessible name (critical), three horizontally scrolling tables with no
+keyboard tab stop, and a definition list whose groups defined nothing. A gate that covers the four
+easiest pages in a product reports green about the pages least likely to be wrong.
+
+**Two defects found by exercising the running system**
+
+- **Receipt number returned blank under a race.** Racing two verifies over HTTP against the live API
+  showed the loser being handed a paid payment whose receipt number had not been written yet — which
+  the success screen and the receipt modal both render. The unit test for the same race never caught
+  it, because the in-memory replica set settles the transaction before a second caller can look. The
+  read-back now waits that window out with a deadline; the regression test was confirmed failing
+  without the fix.
+- **The naira/kobo unit trap**, caught before it shipped. Flutterwave quotes major units where
+  Paystack quoted minor ones, so passing `amount_kobo` through unchanged would have charged a parent
+  one hundred times the course fee.
+
+**Limitations carried forward**
+
+- **The light theme does not meet WCAG AA for text contrast (ADR-037).** It had never been scanned
+  before this batch. The full sweep measured roughly **330 failing nodes across 47 distinct colour
+  pairs**, almost all of them in the light theme. The cause is structural, not a set of oversights:
+  text sits on pale tints of the brand colours, and on those surfaces **even `--text-secondary`
+  (`#6b7280`) measures 4.33–4.42:1**, below the 4.5:1 floor — so no grey passes while still reading
+  as quieter than body text. Fixing it needs a palette change, which the product owner has declined
+  in order to keep the retained design (ADR-020, ADR-029, ADR-037).
+
+  Adding all 47 pairs to the exemption list was **rejected**: it would have produced a gate that
+  passes by naming everything that fails it. Contrast is therefore enforced on the **dark theme**,
+  which is the default and passes with its documented exemptions, while the light theme is still
+  scanned in full for every other serious and critical rule. The narrowing is stated in the test
+  helper's signature and at the top of `a11y.spec.js`, not buried in a list. Reproduce the census
+  with `npm run axe:sweep`.
+- **Flutterwave is test mode only.** No real money moves. With no key configured the gateway
+  simulates, so local development and CI need no account, and such a receipt says "DEMONSTRATION
+  PAYMENT" on its face.
+- **Hausa ships unreviewed** by a native speaker (ADR-034), covering interface chrome only.
+- **Socket.IO runs on one instance.** A second would need a Redis adapter or chat would reach only
+  the users on the same instance.
+- **The free tier sleeps**: the first request after ~15 minutes idle takes 30–50 seconds. The client
+  shows a "Waking the server…" notice after four seconds so it reads as a cold start.
+
+**Needs the author**
+
+1. Create the accounts and deploy: Atlas, Cloudinary, SMTP, Flutterwave test keys, Render Blueprint,
+   Vercel project with root `client`. Every step is in `docs/DEPLOYMENT.md`.
+2. **Rotate the Atlas password** before submission — a credentials file exists elsewhere in the Kids
+   In Tech folder. It is outside this repository and has never been read into it.
+3. Run the 25-row production test report and fill in the real results; fill the live Lighthouse row.
+4. Record the 10-minute demo (`docs/DEMO-SCRIPT.md`) — re-seed first, since the demo session is live
+   for 60 minutes from the seed (ADR-028).
 
 ### Batch 2 — Learning core and hybrid sessions (3 Nov 2026)
 
@@ -222,12 +321,14 @@ product owner on 23 October:
   matched by exact colour pair, per node.
 - Batches 2 and 3 are not built; the screens that need them render empty states against endpoints
   that return empty, correctly shaped data (ADR-018).
-- Paystack is test mode only.
+- The payment gateway is test mode only, and in Batch 1 it did not exist yet — `/payments` and
+  `/subscriptions` returned correctly shaped empty data (ADR-018). See the Batch 3 entry for what
+  was actually built, and ADR-036 for the change of provider.
 
 **Needs the student**
 
 1. **Create the GitHub repository and push** — the remote `MubarakAliyu/KITOS-MERN` does not exist yet
    and `gh` is not authenticated here, so CI has never run. Commands are in the Batch 1 hand-off.
-2. Accounts for Batch 3: MongoDB Atlas, Render, Vercel, Cloudinary, SMTP, Paystack test keys.
+2. Accounts for Batch 3: MongoDB Atlas, Render, Vercel, Cloudinary, SMTP, Flutterwave test keys.
 3. Answers to PRD §17: the production domains, course fee amounts, a native-speaker pass on the Hausa
    strings, and which KIT address sends mail.

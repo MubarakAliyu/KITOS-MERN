@@ -30,19 +30,27 @@ export async function getSubscriptions() {
 }
 
 /**
- * Initiates a Paystack checkout. Returns access_code + reference + authorization_url.
+ * Opens a Flutterwave checkout (ADR-036).
+ *
+ * Returns `{ reference, link, amount, amount_kobo, simulated, payment }`.
+ * `link` is the hosted Standard checkout URL; `simulated: true` means the API
+ * has no Flutterwave key and the modal should walk its own steps instead.
+ *
+ * The amount in `payload` is sent for shape compatibility with the retained
+ * modal and ignored by the server, which charges the course fee.
  */
 export async function initiatePayment(payload) {
-  const { data } = await apiClient.post("/paystack/initiate", payload);
+  const { data } = await apiClient.post("/payments/initiate", payload);
   return data;
 }
 
 /**
- * Verifies a completed Paystack transaction and persists the row. Returns the
- * full payment object so the UI can show the receipt without an extra round trip.
+ * Verifies a completed Flutterwave transaction and persists the row. Returns
+ * the full payment object so the UI can show the receipt without an extra
+ * round trip. Safe to call twice: the server confirms exactly once.
  */
 export async function verifyPayment(payload) {
-  const { data } = await apiClient.post("/paystack/verify", payload);
+  const { data } = await apiClient.post("/payments/verify", payload);
   return data;
 }
 

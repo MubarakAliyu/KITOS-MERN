@@ -93,7 +93,7 @@ Critical fields:
 - `modules`: `{ id, course_id, title, order_index }`
 - `lessons`: `{ id, module_id, title, content_type, youtube_url, body_content, order_index }`
 - `messages`: `{ id, sender_id, receiver_id, message, file_url, created_at }`
-- `payments`: `{ id, parent_id, student_id, amount, type, status, paystack_ref, created_at }`
+- `payments`: `{ id, parent_id, student_id, amount, type, status, tx_ref, created_at }`
 
 ## Endpoint inventory
 
@@ -109,6 +109,6 @@ See each service file in `src/_lib/api/` for the exact URL and payload shape:
 | `courses.js` | `GET /courses`, `GET /courses/:id/modules` |
 | `lessons.js` | `GET /lessons/:id`, `GET /modules/:id/lessons`, `POST /lessons/:id/complete`, `PUT /lessons/:id` |
 | `chat.js` | `GET /conversations`, `GET /conversations/:id/messages`, `POST /messages`, `PUT /messages/read` |
-| `payments.js` | `GET /payments`, `GET /payments/stats`, `GET /payments/:id/receipt`, `GET /subscriptions`, `POST /subscriptions/cancel`, `POST /paystack/initiate`, `POST /paystack/verify` |
+| `payments.js` | `GET /payments`, `GET /payments/stats`, `GET /payments/:id/receipt`, `GET /subscriptions`, `POST /subscriptions/cancel`, `POST /payments/initiate`, `POST /payments/verify` |
 | `notifications.js` | `GET /notifications`, `PUT /notifications/:id/read`, `POST /admin/notifications/send` |
 | `settings.js` | `PUT /user/profile`, `PUT /user/password`, `PUT /user/language`, `PUT /user/notifications` |

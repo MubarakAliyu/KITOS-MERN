@@ -86,7 +86,12 @@ export default function AdminRecordingsPage() {
           {/* Filters */}
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-2 sm:flex-row">
-              <select value={course} onChange={(e) => setCourse(e.target.value)} className={selectClass}>
+              <select
+                aria-label="Filter by course"
+                value={course}
+                onChange={(e) => setCourse(e.target.value)}
+                className={selectClass}
+              >
                 <option value="">All Courses</option>
                 {courseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>

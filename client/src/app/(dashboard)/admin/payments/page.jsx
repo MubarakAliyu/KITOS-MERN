@@ -119,7 +119,7 @@ export default function AdminPaymentsPage() {
       p.amount,
       p.type,
       p.status,
-      p.paystack_ref,
+      p.tx_ref,
     ]);
     const csv = [headers, ...rows]
       .map((r) =>

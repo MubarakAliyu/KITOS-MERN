@@ -2,12 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
 import { BookOpen, CheckCircle, Clock, Search } from "lucide-react";
 import { getCourses } from "@/_lib/api/courses";
-import { getPayments } from "@/_lib/api/payments";
 import CourseThumbnail from "@/_components/ui/CourseThumbnail";
 
 const COURSE_GRADIENTS = {
@@ -21,37 +19,32 @@ function gradientFor(courseId) {
 }
 
 export default function CoursesPage() {
-  const { data: session } = useSession();
   const [courses, setCourses] = useState([]);
-  const [enrollments, setEnrollments] = useState({});
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const pathname = usePathname();
 
+  /**
+   * Courses only. This used to fetch the child's payment rows alongside, to
+   * badge each card "Enrolled" or "Payment Pending" — a leftover from when
+   * the screen ran on mock data. Against the real API that is a `403` on
+   * every visit, because `payment.view` belongs to administrators and
+   * parents and not to children, and the `.catch(() => [])` meant it failed
+   * silently: the badge simply never appeared and the console filled up.
+   *
+   * It should not have worked even if it had been permitted. Whether a fee
+   * has been paid is between a parent and the school; "Payment Pending" is
+   * not something to put in front of a nine-year-old. The course payload now
+   * carries `enrollment_status`, which is the fact this screen actually
+   * needs.
+   */
   useEffect(() => {
     setLoading(true);
-    const studentId = session?.user?.id;
-    Promise.all([
-      getCourses(),
-      studentId
-        ? getPayments({ student_id: studentId }).catch(() => [])
-        : Promise.resolve([]),
-    ])
-      .then(([list, payments]) => {
-        setCourses(list ?? []);
-        // Map course_id → best status. Prefer paid over pending over failed.
-        const rank = { paid: 3, pending: 2, failed: 1 };
-        const map = {};
-        for (const p of payments ?? []) {
-          const cur = map[p.course_id];
-          if (!cur || (rank[p.status] ?? 0) > (rank[cur] ?? 0)) {
-            map[p.course_id] = p.status;
-          }
-        }
-        setEnrollments(map);
-      })
+    getCourses()
+      .then((list) => setCourses(list ?? []))
+      .catch(() => setCourses([]))
       .finally(() => setLoading(false));
-  }, [pathname, session?.user?.id]);
+  }, [pathname]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -86,7 +79,7 @@ export default function CoursesPage() {
               key={course.id}
               course={course}
               index={i}
-              enrollmentStatus={enrollments[course.id]}
+              enrollmentStatus={course.enrollment_status}
             />
           ))}
         </div>
@@ -151,8 +144,24 @@ function CourseCard({ course, index, enrollmentStatus }) {
   );
 }
 
+/**
+ * Enrolment, in the child's own terms.
+ *
+ * The three states a pupil can be in on a published course, and none of them
+ * mentions money: on it, finished it, or not on it yet. The last reads "Not
+ * enrolled" rather than "Payment Pending" — a child who sees a course they
+ * are not on should be told to ask, not told their parent owes the school.
+ */
 function EnrollmentStatusBadge({ status }) {
-  if (status === "paid") {
+  if (status === "completed") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-[#10B981]/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#10B981] font-mono-ui">
+        <CheckCircle className="h-3 w-3" strokeWidth={2.5} />
+        Completed
+      </span>
+    );
+  }
+  if (status === "active") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-[#10B981]/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#10B981] font-mono-ui">
         <CheckCircle className="h-3 w-3" strokeWidth={2.5} />
@@ -160,14 +169,15 @@ function EnrollmentStatusBadge({ status }) {
       </span>
     );
   }
-  if (status === "pending") {
+  if (status === "") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-500 font-mono-ui">
+      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)] font-mono-ui">
         <Clock className="h-3 w-3" strokeWidth={2.5} />
-        Payment Pending
+        Not enrolled
       </span>
     );
   }
+  // Null — the viewer is not a student, so the question does not apply.
   return <span />;
 }
 

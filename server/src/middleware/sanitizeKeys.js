@@ -12,13 +12,24 @@
  * dollar sign.
  */
 
+/**
+ * A plain `{}` object, and nothing else.
+ *
+ * Checked by prototype rather than by listing exceptions. The looser
+ * "typeof object and not an array or a Date" test was wrong in a way that
+ * mattered: a Buffer passes it, so `Object.entries` walked its bytes and
+ * rebuilt it as `{0: 12, 1: 34, …}`. That clobbered the raw body a webhook
+ * signature was computed over, and would do the same to any future binary
+ * upload. (The current gateway authenticates with a header instead, so no
+ * route depends on a raw body today — the check stays because the failure
+ * mode was silent, and the next raw body would hit it just as quietly.) A
+ * JSON body only ever holds plain objects, arrays and primitives, so nothing
+ * legitimate is excluded here.
+ */
 function isPlainObject(value) {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    !(value instanceof Date)
-  );
+  if (typeof value !== "object" || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }
 
 /**

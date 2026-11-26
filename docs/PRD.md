@@ -18,6 +18,14 @@
 
 **How to read this document.** Sections 2 to 5 explain why and what. Sections 6 to 13 are the build specification. Section 14 sets acceptance criteria and Section 15 the execution plan. Where this PRD and the batch prompts disagree, this PRD wins; open questions go to `docs/DECISIONS.md`.
 
+## 1.1 Amendments
+
+| Date | Amendment | Authority |
+|---|---|---|
+| 25 November 2026 | **The payment gateway is Flutterwave v3, not Paystack.** Paystack's compliance review for the KIT account stalled with no date attached; the school's Flutterwave account is verified. Everywhere this document says Paystack — §5 goal 4, FR16, §9.3, §11.1, §12, §13, §15.2, §16 — read Flutterwave. The routes are `/payments/initiate`, `/payments/verify` and `/payments/webhook`; the environment variables are `FLW_SECRET_KEY`, `FLW_WEBHOOK_HASH` and `NEXT_PUBLIC_FLW_PUBLIC_KEY`; the `payments` field `paystack_ref` is `tx_ref`. Two differences carry real risk and are handled at the gateway wrapper: Flutterwave quotes amounts in **naira**, not kobo, and its webhook is authenticated by a **static `verif-hash` header rather than a body signature** — so the webhook re-verifies every transaction against the API before marking it paid, and never trusts the body. Receipts keep `RCP-YYYYMM-NNNN`. Every other payment rule in §11.1 stands unchanged. | Product owner; ADR-036 |
+
+The body of this document is left as approved on 17 October 2026. Read it with the table above.
+
 ## 2. Summary
 
 KITOS is the learning management system that supports Kids In Tech's online sessions alongside its physical coding bootcamps for children aged 8 to 18. Its frontend is complete: a Next.js 16 / React 19 application with dashboards for students, parents, instructors and administrators. But it runs entirely on mock data (Mock Service Worker), and the backend that exists, a PHP/MySQL API, is not connected, cannot be deployed safely and disagrees with the frontend on field names.
@@ -341,6 +349,17 @@ Socket.IO events (server implements what `useChat.js` emits): client → server 
 ## 11. Integrations
 
 ### 11.1 Paystack (test mode)
+
+> **Amended 25 November 2026 — the gateway is Flutterwave v3 (ADR-036).** The steps below are
+> still the design; three details in them are not what was built. The routes are
+> `/payments/initiate`, `/payments/verify` and `/payments/webhook`. Initiate calls
+> `POST /v3/payments` (Standard checkout) with `tx_ref` and an amount **in naira**, and returns a
+> hosted `link` rather than an `access_code`; verify calls
+> `GET /v3/transactions/verify_by_reference?tx_ref=…` and checks status, amount, currency NGN and
+> the returned reference. The webhook is authenticated by a static `verif-hash` header, not an
+> HMAC over the body, so it **re-verifies the transaction against the API before marking anything
+> paid** and treats the body only as a prompt to go and ask. Step 4 is unchanged. Simulated mode
+> keys off `FLW_SECRET_KEY` instead of `PAYSTACK_SECRET_KEY`.
 
 1. `POST /paystack/initiate { student_id, course_id, type }` → server creates `payments` (pending, ref `KIT-<ulid>`) and calls Paystack `transaction/initialize` (amount in kobo, parent email, callback). Returns `{ reference, authorization_url, access_code }`. If `PAYSTACK_SECRET_KEY` is unset, returns a simulated reference so the existing four-step modal still works in development.
 2. Client completes popup, then `POST /paystack/verify { reference }` → server calls `transaction/verify/:reference`.

@@ -3,6 +3,7 @@ import * as userService from "../services/user.service.js";
 import * as adminService from "../services/admin.service.js";
 import * as familyService from "../services/family.service.js";
 import * as settingsService from "../services/settings.service.js";
+import * as analyticsService from "../services/analytics.service.js";
 import * as notificationService from "../services/notification.service.js";
 import { clientIp, logActivity } from "../lib/audit.js";
 import { badRequest } from "../lib/errors.js";
@@ -176,6 +177,10 @@ export const getAdminStats = handle(async (_req, res) => {
   res.status(200).json(await adminService.getStats());
 });
 
+export const getAdminAnalytics = handle(async (req, res) => {
+  res.status(200).json(await analyticsService.getAnalytics(req.query));
+});
+
 export const postPermissions = handle(async (req, res) => {
   // The screen posts `{ permissions: {…} }`; the matrix may also be posted
   // as the body itself.
@@ -319,5 +324,26 @@ export const postSendNotification = handle(async (req, res) => {
     user: req.user,
     payload: req.body,
   });
+
+  // Only an administrator's broadcast is an administrative act worth
+  // auditing. The same endpoint carries ordinary platform events fired from
+  // any signed-in user's browser, and auditing those would bury the log.
+  if (req.user.role === "admin" && result.announcement_id) {
+    await logActivity({
+      actor: actorOf(req),
+      action: "sent_announcement",
+      description: `Announced "${req.body.title}" to ${result.delivered} recipient(s)`,
+      target_type: "announcement",
+      target_id: result.announcement_id,
+      ip: clientIp(req),
+    });
+  }
+
   res.status(200).json(result);
 });
+
+/** Batch 3 — chat, notifications and announcements. */
+export * from "./chat.js";
+
+/** Batch 3 — payments, receipts and subscriptions. */
+export * from "./payments.js";
