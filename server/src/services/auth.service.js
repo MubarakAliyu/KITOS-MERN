@@ -241,9 +241,24 @@ export async function requestPasswordReset({ email, ip }) {
  * Either way `must_reset_password` is cleared and `token_version` incremented,
  * so any session opened before the change is dead.
  *
- * @param {{ token?: string, temp_token?: string, password: string, ip?: string }} input
+ * The `temp_token` path also requires `current_password` — the temporary
+ * password the account just signed in with. The token alone already implies
+ * knowledge of it, since nothing else issues one, but a password change that
+ * asks for no password at all is a bad thing to have sitting in a codebase:
+ * it means any later route that can produce a temp token becomes a way to take
+ * an account over. The emailed path asks for nothing, because control of the
+ * inbox is the proof there.
+ *
+ * @param {{ token?: string, temp_token?: string, current_password?: string,
+ *           password: string, ip?: string }} input
  */
-export async function resetPassword({ token, temp_token, password, ip }) {
+export async function resetPassword({
+  token,
+  temp_token,
+  current_password,
+  password,
+  ip,
+}) {
   let user;
 
   if (temp_token) {
@@ -257,6 +272,26 @@ export async function resetPassword({ token, temp_token, password, ip }) {
     // twice.
     if ((payload.tv ?? 0) !== (user.token_version ?? 0)) {
       throw badRequest("Invalid or expired token", "This reset link has already been used");
+    }
+
+    if (!current_password) {
+      throw badRequest("Validation failed", undefined, {
+        current_password: "Enter the temporary password you signed in with",
+      });
+    }
+
+    if (!(await user.verifyPassword(current_password))) {
+      await logActivity({
+        actor: { id: user._id, role: user.role, name: user.name },
+        action: "password_change_failed",
+        description: `${user.name} supplied the wrong temporary password`,
+        target_type: "user",
+        target_id: String(user._id),
+        ip,
+      });
+      throw badRequest("Validation failed", undefined, {
+        current_password: "That is not the temporary password you signed in with",
+      });
     }
   } else if (token) {
     user = await User.findOne({
@@ -304,7 +339,14 @@ export async function changePassword({
   ip,
 }) {
   if (temp_token) {
-    return resetPassword({ temp_token, password: new_password, ip });
+    // The forced first-login path. It proves itself with the temp token plus
+    // the temporary password, so there is no session to read a user from.
+    return resetPassword({
+      temp_token,
+      current_password,
+      password: new_password,
+      ip,
+    });
   }
 
   if (!sessionUser) {

@@ -345,3 +345,179 @@ test.describe("chat", () => {
     await expect(transcript.getByText(text, { exact: true })).toHaveCount(1);
   });
 });
+
+/**
+ * The forced first-login change, end to end (production fix).
+ *
+ * This is the flow a new account has to walk before it can do anything, and
+ * on the live site it could not be walked at all: the force-reset screen's
+ * POST answered 401, so the new password was never saved, and because the
+ * temporary password still forced a reset the account was simply stuck. Two
+ * instructor accounts were in that state.
+ *
+ * Every step of it had a passing server test. What had none was the step
+ * between the steps — the client sending the temp token as a Bearer
+ * credential, which the API refuses by design. Only driving the whole thing
+ * through the browser shows that, so that is what these do.
+ */
+test.describe("first sign-in", () => {
+  /** Fills the force-reset form and submits it. */
+  async function setPassword(page, { temporary, chosen }) {
+    await page.waitForURL(/force-reset-password/, { timeout: 45000 });
+    // `exact`: the reveal button beside each field is labelled "Show
+    // temporary password", which a substring match picks up as well.
+    await page
+      .getByLabel("Temporary password", { exact: true })
+      .fill(temporary);
+    await page.getByLabel("New password", { exact: true }).fill(chosen);
+    await page.getByLabel("Confirm password", { exact: true }).fill(chosen);
+    await page
+      .getByRole("button", { name: /set password & continue/i })
+      .click();
+  }
+
+  test("an admin-created account sets its own password and signs in with it", async ({
+    page,
+  }) => {
+    test.setTimeout(180000);
+    const errors = collectErrors(page);
+    const name = `E2E First ${stamp()}`;
+    const email = `e2e.first.${Date.now()}@example.com`;
+    const chosen = "ChosenByMe123";
+
+    // ── The administrator creates the account and reads the password ──
+    await signIn(page, "admin");
+    await page.goto("/admin/users");
+    await page.getByRole("button", { name: "Add User" }).click();
+
+    const modal = dialog(page);
+    await modal.getByLabel("Full Name").fill(name);
+    await modal.getByLabel("Role", { exact: true }).selectOption("instructor");
+    await modal.getByLabel("Email", { exact: true }).fill(email);
+    await modal.getByRole("button", { name: "Create User" }).click();
+
+    const created = page.getByRole("dialog", { name: /account created/i });
+    await expect(created).toBeVisible({ timeout: 20000 });
+    const temporary = await created.locator("code").innerText();
+    await created.getByRole("button", { name: "Done" }).click();
+
+    // ── The new instructor signs in with it and is made to change it ──
+    await page.context().clearCookies();
+    await page.goto("/login");
+    await page.getByLabel(/email or admission number/i).fill(email);
+    await page.getByLabel(/^password$/i).fill(temporary);
+    await page.getByRole("button", { name: /sign in/i }).click();
+
+    await setPassword(page, { temporary, chosen });
+
+    // "& Continue" means what it says: straight to their own dashboard, not
+    // back to the sign-in form to type the password a third time.
+    await page.waitForURL(/\/instructor(\/|$)/, { timeout: 45000 });
+
+    // ── And the password holds on the next sign-in ──
+    await page.context().clearCookies();
+    await page.goto("/login");
+    await page.getByLabel(/email or admission number/i).fill(email);
+    await page.getByLabel(/^password$/i).fill(chosen);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL(/\/instructor(\/|$)/, { timeout: 45000 });
+
+    // Not sent back to set a password again: the flag is cleared.
+    await expect(page).not.toHaveURL(/force-reset-password/);
+
+    expect(errors()).toEqual([]);
+  });
+
+  test("the temporary password is required, and checked", async ({ page }) => {
+    test.setTimeout(180000);
+    const name = `E2E Wrong ${stamp()}`;
+    const email = `e2e.wrong.${Date.now()}@example.com`;
+
+    await signIn(page, "admin");
+    await page.goto("/admin/users");
+    await page.getByRole("button", { name: "Add User" }).click();
+
+    const modal = dialog(page);
+    await modal.getByLabel("Full Name").fill(name);
+    await modal.getByLabel("Role", { exact: true }).selectOption("instructor");
+    await modal.getByLabel("Email", { exact: true }).fill(email);
+    await modal.getByRole("button", { name: "Create User" }).click();
+
+    const created = page.getByRole("dialog", { name: /account created/i });
+    await expect(created).toBeVisible({ timeout: 20000 });
+    const temporary = await created.locator("code").innerText();
+    await created.getByRole("button", { name: "Done" }).click();
+
+    await page.context().clearCookies();
+    await page.goto("/login");
+    await page.getByLabel(/email or admission number/i).fill(email);
+    await page.getByLabel(/^password$/i).fill(temporary);
+    await page.getByRole("button", { name: /sign in/i }).click();
+
+    // The wrong one first. The screen must say which field is wrong and why,
+    // not "Couldn't update password — try again", which was all it ever said.
+    await setPassword(page, {
+      temporary: "NotThePassword1",
+      chosen: "ChosenByMe123",
+    });
+    await expect(page.getByText(/not the temporary password/i)).toBeVisible({
+      timeout: 20000,
+    });
+    await expect(page).toHaveURL(/force-reset-password/);
+
+    // Then the right one, on the same screen, without signing in again.
+    await setPassword(page, { temporary, chosen: "ChosenByMe123" });
+    await page.waitForURL(/\/instructor(\/|$)/, { timeout: 45000 });
+  });
+
+  test("an admin reset sends that account back through the same flow", async ({
+    page,
+  }) => {
+    test.setTimeout(180000);
+    const name = `E2E Recover ${stamp()}`;
+    const email = `e2e.recover.${Date.now()}@example.com`;
+    const chosen = "RecoveredPass123";
+
+    page.on("dialog", (d) => d.accept());
+
+    await signIn(page, "admin");
+    await page.goto("/admin/users");
+    await page.getByRole("button", { name: "Add User" }).click();
+
+    const modal = dialog(page);
+    await modal.getByLabel("Full Name").fill(name);
+    await modal.getByLabel("Role", { exact: true }).selectOption("instructor");
+    await modal.getByLabel("Email", { exact: true }).fill(email);
+    await modal.getByRole("button", { name: "Create User" }).click();
+
+    const created = page.getByRole("dialog", { name: /account created/i });
+    await expect(created).toBeVisible({ timeout: 20000 });
+    await created.getByRole("button", { name: "Done" }).click();
+
+    /**
+     * The recovery this was wanted for: a password nobody wrote down.
+     *
+     * The first one is deliberately thrown away here — that is the situation
+     * being recovered from, and the test should not quietly keep a copy.
+     */
+    const row = page.locator("tbody tr").filter({ hasText: name }).first();
+    await expect(row).toBeVisible({ timeout: 20000 });
+    await row.getByRole("button", { name: "Reset password" }).click();
+
+    const reissued = page.getByRole("dialog", {
+      name: /new temporary password/i,
+    });
+    await expect(reissued).toBeVisible({ timeout: 20000 });
+    const temporary = await reissued.locator("code").innerText();
+    await reissued.getByRole("button", { name: "Done" }).click();
+
+    await page.context().clearCookies();
+    await page.goto("/login");
+    await page.getByLabel(/email or admission number/i).fill(email);
+    await page.getByLabel(/^password$/i).fill(temporary);
+    await page.getByRole("button", { name: /sign in/i }).click();
+
+    await setPassword(page, { temporary, chosen });
+    await page.waitForURL(/\/instructor(\/|$)/, { timeout: 45000 });
+  });
+});

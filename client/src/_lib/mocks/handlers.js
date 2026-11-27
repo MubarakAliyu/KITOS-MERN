@@ -1724,6 +1724,27 @@ export const handlers = [
     // entry so the next login follows the normal path.
     const rawToken = body?.temp_token ?? body?.token;
     if (typeof rawToken === "string" && rawToken.startsWith("temp_")) {
+      /**
+       * The API requires the temporary password on this path, so the mock
+       * must too.
+       *
+       * A mock that accepts what the API refuses is the exact failure this
+       * project keeps paying for: the UI is built against the mock, passes,
+       * and breaks on the real thing. Here that would hide a missing field
+       * on the force-reset form.
+       */
+      if (!body?.current_password) {
+        return HttpResponse.json(
+          {
+            error: "Validation failed",
+            fields: {
+              current_password: "Enter the temporary password you signed in with",
+            },
+          },
+          { status: 400 }
+        );
+      }
+
       const identifier = rawToken.replace(/^temp_/, "");
       const isAdmissionNo = /^KIT\/\d{2}\/\d{3}$/i.test(identifier);
 

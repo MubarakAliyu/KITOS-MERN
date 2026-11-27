@@ -9,6 +9,57 @@
 
 ## Log
 
+### Production fix — the forced first-login password change (27 Nov 2026)
+
+A new account could not be used. Signing in with a temporary password landed on
+`/force-reset-password` as intended, and "Set Password & Continue" then answered 401: *a
+password-reset token cannot be used to authenticate a request*. The new password was never saved,
+and because the temporary one still forced a reset, the account was stuck — including the two
+instructor accounts recovered by the reset action added the same day.
+
+The cause was a contract, not a bug in either half. The client's NextAuth session for a must-change
+account carried the temp token as its `accessToken`, so the axios interceptor attached it as a Bearer
+credential. The route branched on the `Authorization` header being present, `authenticate` correctly
+refused a reset-purpose token, and the request died there — in front of a service that handles temp
+tokens perfectly well. Every step had a passing server test; what had no test was the step between
+the steps.
+
+- **The body decides which flow it is**, not the header. A request carrying a `temp_token` is never
+  authenticated, whatever headers it arrives with.
+- **No reset token is a session credential.** `accessToken` is empty for a must-change account; the
+  temp token travels in the request body, where it belongs.
+- **The temporary password is required** to complete a forced reset, on `/user/change-password` and
+  `/reset-password` alike. The token already implied knowledge of it, but a password change that
+  proves nothing is a hole waiting for the next route that can mint a token.
+- **The screen says what is wrong.** Server field errors land on the field; "Couldn't update
+  password — try again" was all it ever said, which is no help at all when the answer is "that is
+  not the temporary password you signed in with".
+- **"& Continue" continues.** On success the page signs in with the new password and goes to the
+  role's dashboard instead of returning to the login form to type it a third time. If that sign-in
+  fails it falls back to `/login?reset=success`, because the password did save.
+- Removed the `default1234` rule and the "You're using the default password" notice. Accounts have
+  had a random per-account temporary password for some time; the rule asked people to differ from a
+  string they had never seen, and the notice advertised the old shared default.
+
+One more thing fell out of writing the tests. `/user/change-password` and `/reset-password` were
+limited to **10 an hour per IP address**, and a KIT centre is one shared connection: every family and
+every instructor in the building leaves by the same address, so an ordinary intake week would lock
+the eleventh family out of an account they could not yet sign in to. The limit is now keyed on the
+credential the request carries — a hash of the reset token, or of the session's bearer — so the
+budget is ten attempts per sign-in, which is the unit the limit is about. The trade is stated in
+`rateLimit.js`: one address now gets ten attempts per account rather than ten in total, the same
+trade `loginLimiter` already makes. The force-reset screen also repeats the server's own sentence now
+("Too many attempts. Please try again later.") instead of "try again", which in that case was not
+just unhelpful but wrong.
+
+Tests: eight server tests on the flow, including one that sends the temp token **as a Bearer header
+as well** — the exact shape of the production request, and the test that fails if the route goes back
+to branching on the header — and one that walks admin-created → first sign-in → set password → sign
+in again. Three Playwright tests drive the whole thing through the browser: the full round trip, the
+wrong temporary password followed by the right one, and recovery after an admin reset. The MSW mock
+now refuses a forced reset with no `current_password`, so it cannot go on accepting what the API
+refuses.
+
 ### Production fix — temporary passwords, and nothing waiting on email (27 Nov 2026)
 
 Creating a user reported failure and created the user. The write had always succeeded; `createUser`

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { env } from "../config/env.js";
 
@@ -61,11 +62,49 @@ export const forgotPasswordLimiter = rateLimit({
   ),
 });
 
-/** /reset-password and /user/change-password — 10 per hour per IP. */
+/**
+ * /reset-password and /user/change-password — 10 per hour, per IP **and
+ * credential**.
+ *
+ * This was per IP alone, which is the wrong unit for where KIT runs. A centre
+ * in Sokoto or Birnin Kebbi is one shared connection: every family, every
+ * instructor and every machine in the building leaves by the same address. Ten
+ * password changes an hour across the whole school is a limit an ordinary
+ * intake week exceeds, and the eleventh family is told to come back later with
+ * an account they cannot sign in to.
+ *
+ * Keyed on the credential the request carries — the reset or temp token, or
+ * the bearer of a signed-in session — the budget becomes ten attempts per
+ * sign-in, which is the unit the limit is actually about: guessing the current
+ * password of one account.
+ *
+ * Hashing the token rather than keying on it directly keeps a credential out
+ * of the limiter's key space, which is held in memory and read by its own
+ * logging. Getting a fresh token means signing in again, which needs the very
+ * password an attacker would be guessing, so a new bucket is not a way around
+ * this.
+ *
+ * The honest cost: one attacker from one address now gets ten attempts per
+ * account rather than ten in total, so a spray across many accounts is no
+ * longer stopped here. `loginLimiter` makes the same trade for the same
+ * reason, and a spray needs a valid token per account to even reach this
+ * route.
+ */
+export function passwordChangeKey(req) {
+  const credential =
+    req.body?.temp_token ?? req.body?.token ?? req.headers?.authorization;
+  const scope =
+    typeof credential === "string" && credential.length > 0
+      ? crypto.createHash("sha256").update(credential).digest("hex").slice(0, 32)
+      : "anonymous";
+  return `${ipKeyGenerator(req.ip)}:${scope}`;
+}
+
 export const passwordChangeLimiter = rateLimit({
   ...base,
   windowMs: 60 * 60 * 1000,
   limit: 10,
+  keyGenerator: passwordChangeKey,
   handler: limitHandler("Too many attempts. Please try again later."),
 });
 

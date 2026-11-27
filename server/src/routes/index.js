@@ -56,16 +56,38 @@ router.post(
 
 /**
  * Deliberately not behind `authenticate`: the forced-reset screen posts here
- * with a `temp_token` before any session exists. The service requires either a
- * valid temp token or an authenticated user, so this is not an open endpoint.
+ * with a `temp_token` before any session exists. The service requires a valid
+ * temp token **and** the temporary password, or an authenticated user and
+ * their current password, so this is not an open endpoint.
  */
 router.post(
   "/user/change-password",
   passwordChangeLimiter,
   validate({ body: s.changePasswordBody }),
   async (req, res, next) => {
-    // Attach the user when a normal Bearer token is present, so a signed-in
-    // user changing their password still has their current one checked.
+    /**
+     * A `temp_token` in the body means a forced first-login change, and that
+     * path never authenticates.
+     *
+     * This used to branch on the Authorization header alone, which broke the
+     * flow in production. The client's NextAuth session for a must-change
+     * account carried the temp token as its `accessToken`, so the axios
+     * interceptor sent it as a Bearer credential; `authenticate` then
+     * correctly refused it — "a password-reset token cannot be used to
+     * authenticate a request" — and answered 401 before the service, which
+     * handles temp tokens perfectly well, was ever reached. The user could
+     * not set a password, so they could not sign in at all.
+     *
+     * The client no longer puts a reset token in that header. The body is
+     * what decides here regardless, because which flow this is cannot depend
+     * on a header the caller may or may not have attached.
+     */
+    if (req.body?.temp_token || req.body?.token) {
+      c.postChangePassword(req, res, next);
+      return;
+    }
+    // Otherwise attach the user, so a signed-in person changing their
+    // password still has their current one checked.
     if (req.headers.authorization) {
       authenticate(req, res, (err) => (err ? next(err) : c.postChangePassword(req, res, next)));
       return;

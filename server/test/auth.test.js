@@ -368,7 +368,11 @@ describe("password reset", () => {
 
     const reset = await request(server)
       .post("/user/change-password")
-      .send({ temp_token: tempToken, new_password: "BrandNew123" });
+      .send({
+        temp_token: tempToken,
+        current_password: PASSWORD,
+        new_password: "BrandNew123",
+      });
     expect(reset.status).toBe(200);
 
     const reloaded = await User.findById(user._id);
@@ -398,12 +402,20 @@ describe("password reset", () => {
 
     const first = await request(server)
       .post("/user/change-password")
-      .send({ temp_token: tempToken, new_password: "BrandNew123" });
+      .send({
+        temp_token: tempToken,
+        current_password: PASSWORD,
+        new_password: "BrandNew123",
+      });
     expect(first.status).toBe(200);
 
     const replay = await request(server)
       .post("/user/change-password")
-      .send({ temp_token: tempToken, new_password: "Different123" });
+      .send({
+        temp_token: tempToken,
+        current_password: PASSWORD,
+        new_password: "Different123",
+      });
     expect(replay.status).toBe(400);
   });
 
@@ -417,5 +429,220 @@ describe("password reset", () => {
 
     expect(wrong.status).toBe(400);
     expect(wrong.body.fields.current_password).toBeTruthy();
+  });
+});
+
+/**
+ * The forced first-login change (production fix).
+ *
+ * On the live site this flow could not be completed at all. The client's
+ * NextAuth session for a must-change account carried the temp token as its
+ * `accessToken`, so the axios interceptor attached it as a Bearer credential;
+ * the route branched on the Authorization header being present, `authenticate`
+ * correctly refused a reset-purpose token, and the request answered 401 before
+ * the service — which handles temp tokens perfectly well — was ever reached.
+ *
+ * A user given a temporary password therefore could not set a password, and
+ * because the temporary one still forced a reset, could not sign in either.
+ * Both instructor accounts were in that state.
+ */
+describe("forced first-login password change", () => {
+  async function forcedAccount(email = "forced.flow@kit.test") {
+    await makeUser({ role: "instructor", email, must_reset_password: true });
+    const signIn = await login(server, email);
+    expect(signIn.status).toBe(200);
+    return { email, tempToken: signIn.body.temp_token };
+  }
+
+  /**
+   * The regression itself: the request still carries the temp token in the
+   * Authorization header, as a browser holding a stale session would.
+   *
+   * The body is what decides which flow this is. Were the route to go back to
+   * branching on the header, this is the test that fails.
+   */
+  it("succeeds even when the temp token is also sent as a Bearer token", async () => {
+    const { email, tempToken } = await forcedAccount();
+
+    const res = await request(server)
+      .post("/user/change-password")
+      .set("Authorization", `Bearer ${tempToken}`)
+      .send({
+        temp_token: tempToken,
+        current_password: PASSWORD,
+        new_password: "ChosenByMe123",
+      });
+
+    expect(res.status).toBe(200);
+
+    const after = await request(server)
+      .post("/login")
+      .send({ email, password: "ChosenByMe123" });
+    expect(after.status).toBe(200);
+    expect(after.body.access).toBeTruthy();
+    expect(after.body.must_reset_password).toBeUndefined();
+  });
+
+  it("requires the temporary password", async () => {
+    const { tempToken } = await forcedAccount("needs.current@kit.test");
+
+    const res = await request(server)
+      .post("/user/change-password")
+      .send({ temp_token: tempToken, new_password: "ChosenByMe123" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.fields.current_password).toBeTruthy();
+  });
+
+  it("refuses the wrong temporary password, and changes nothing", async () => {
+    const { email, tempToken } = await forcedAccount("wrong.current@kit.test");
+
+    const res = await request(server)
+      .post("/user/change-password")
+      .send({
+        temp_token: tempToken,
+        current_password: "NotThePassword1",
+        new_password: "ChosenByMe123",
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.fields.current_password).toBeTruthy();
+
+    // The attempt is audited, and the account is untouched: the temporary
+    // password still works and still forces a change.
+    const entry = await ActivityLog.findOne({
+      action: "password_change_failed",
+    });
+    expect(entry).toBeTruthy();
+
+    const stillForced = await login(server, email);
+    expect(stillForced.body.must_reset_password).toBe(true);
+  });
+
+  it("clears the flag and ends the sessions the account had", async () => {
+    const email = "clears.flag@kit.test";
+    const user = await makeUser({
+      role: "instructor",
+      email,
+      must_reset_password: true,
+    });
+    const before = await User.findById(user._id).select("+token_version");
+    const signIn = await login(server, email);
+
+    const res = await request(server).post("/user/change-password").send({
+      temp_token: signIn.body.temp_token,
+      current_password: PASSWORD,
+      new_password: "ChosenByMe123",
+    });
+    expect(res.status).toBe(200);
+
+    const after = await User.findById(user._id).select("+token_version");
+    expect(after.must_reset_password).toBe(false);
+    expect(after.token_version).toBeGreaterThan(before.token_version ?? 0);
+  });
+
+  /**
+   * The whole round trip an administrator and a new instructor actually make,
+   * in one test, because every individual step passed while the flow as a
+   * whole did not.
+   */
+  it("takes an account from admin-created to signed in with its own password", async () => {
+    const admin = await makeUser({ role: "admin" });
+
+    const created = await request(server)
+      .post("/admin/users")
+      .set(auth(admin))
+      .send({
+        name: "Fatima Sani",
+        role: "instructor",
+        email: "fatima.sani@kit.test",
+        bio: null,
+      });
+    expect(created.status).toBe(201);
+    const temporary = created.body.temporary_password;
+    expect(temporary).toBeTruthy();
+
+    const first = await request(server)
+      .post("/login")
+      .send({ email: "fatima.sani@kit.test", password: temporary });
+    expect(first.status).toBe(200);
+    expect(first.body.must_reset_password).toBe(true);
+    expect(first.body.access).toBeUndefined();
+
+    const changed = await request(server).post("/user/change-password").send({
+      temp_token: first.body.temp_token,
+      current_password: temporary,
+      new_password: "FatimaOwn123",
+    });
+    expect(changed.status).toBe(200);
+
+    const second = await request(server)
+      .post("/login")
+      .send({ email: "fatima.sani@kit.test", password: "FatimaOwn123" });
+    expect(second.status).toBe(200);
+    expect(second.body.access).toBeTruthy();
+    expect(second.body.user.role).toBe("instructor");
+
+    // And the temporary password is spent.
+    const stale = await request(server)
+      .post("/login")
+      .send({ email: "fatima.sani@kit.test", password: temporary });
+    expect(stale.status).toBe(401);
+  });
+
+  /** The same contract on the public route, which shares the service. */
+  it("requires the temporary password on /reset-password too", async () => {
+    const { tempToken } = await forcedAccount("public.route@kit.test");
+
+    const bare = await request(server)
+      .post("/reset-password")
+      .send({ temp_token: tempToken, new_password: "ChosenByMe123" });
+    expect(bare.status).toBe(400);
+
+    const withIt = await request(server).post("/reset-password").send({
+      temp_token: tempToken,
+      current_password: PASSWORD,
+      new_password: "ChosenByMe123",
+    });
+    expect(withIt.status).toBe(200);
+  });
+});
+
+/**
+ * The password-change rate limit, keyed per credential rather than per IP.
+ *
+ * Written because the E2E suite kept hitting 429 from one address, which is
+ * the same shape as the real problem: a KIT centre is one shared connection,
+ * so per-IP meant ten password changes an hour for the entire school.
+ *
+ * The limiter is skipped under NODE_ENV=test, so these build their own app
+ * with it live — see `test/rate-limit.test.js` for the same pattern.
+ */
+describe("the password-change rate limit", () => {
+  it("counts attempts against the credential, not the address", async () => {
+    const { passwordChangeKey } = await import(
+      "../src/middleware/rateLimit.js"
+    );
+
+    const key = (body, authorization) =>
+      passwordChangeKey({ ip: "102.89.0.1", body, headers: { authorization } });
+
+    const first = key({ temp_token: "token-one" });
+    const second = key({ temp_token: "token-two" });
+    const sameAgain = key({ temp_token: "token-one" });
+
+    // Two accounts behind one address get their own budgets.
+    expect(first).not.toBe(second);
+    // The same credential keeps its own, so the limit still bites.
+    expect(first).toBe(sameAgain);
+
+    // A signed-in change is scoped to its session's bearer token.
+    expect(key({}, "Bearer aaa")).not.toBe(key({}, "Bearer bbb"));
+
+    // The credential itself never appears in the key.
+    expect(first).not.toContain("token-one");
+
+    // And a request carrying nothing still gets a key, scoped to the address.
+    expect(key({})).toContain("anonymous");
   });
 });

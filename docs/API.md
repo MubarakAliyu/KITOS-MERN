@@ -107,9 +107,13 @@ stored, with a 30-minute expiry.
 every existing session for that user ends. 400 `Invalid or expired token` covers an unknown, used or
 expired token alike.
 
+A `temp_token` is accepted here as well, on the same terms as
+`POST /user/change-password` — including `current_password`. The two doors into a forced reset must
+not differ in what they ask for, or the looser one becomes the way in.
+
 ### `POST /user/change-password` — *Public with a temp token, otherwise authenticated*
 
-Rate limited: 10 per hour.
+Rate limited: 10 per hour, keyed on the address **and** the credential the request carries — the reset token, or the session's bearer. Per-IP alone was the wrong unit: a KIT centre is one shared connection, so ten password changes an hour covered the whole school.
 
 ```json
 { "current_password": "…", "new_password": "…" }
@@ -118,12 +122,25 @@ Rate limited: 10 per hour.
 or, completing a forced reset before any session exists:
 
 ```json
-{ "temp_token": "<jwt>", "new_password": "…" }
+{ "temp_token": "<jwt>", "current_password": "<the temporary password>", "new_password": "…" }
 ```
 
-Passwords need 8+ characters with a letter and a digit. On success `token_version` is incremented and
-a fresh `access` is returned, so the caller is not logged out by the revocation they just caused. A
-temp token cannot be replayed.
+Which of the two this is **is decided by the body, not by the `Authorization` header.** A request
+carrying a `temp_token` is never authenticated, even if a header is present. That mattered: the
+client's session for a must-change account used to carry the temp token as its bearer credential, so
+this endpoint saw an `Authorization` header, tried to authenticate it, and answered 401 — "a
+password-reset token cannot be used to authenticate a request" — before reaching the service that
+handles temp tokens. The account could not set a password and so could not sign in at all.
+
+`current_password` is **required on both paths**: the current password when signed in, the temporary
+password when completing a forced reset. 400 with `fields.current_password` when it is missing or
+wrong, and a wrong one writes `password_change_failed` to `activity_logs`.
+
+Passwords need 8+ characters with a letter and a digit. On success `token_version` is incremented, so
+every existing session for that account ends. The authenticated path returns a fresh `access` as
+well, so the caller is not logged out by the revocation it just caused; the forced-reset path returns
+`{ "ok": true, "success": true }` and nothing more — there is no session to keep alive, and the
+client signs in with the new password. A temp token cannot be replayed.
 
 ---
 
@@ -1068,7 +1085,7 @@ boot.
 |---|---|
 | `POST /login` | 10 per 15 min, per IP **and** identifier |
 | `POST /forgot-password` | 5 per hour, per IP |
-| `POST /reset-password`, `POST /user/change-password` | 10 per hour, per IP |
+| `POST /reset-password`, `POST /user/change-password` | 10 per hour, per IP **and credential** |
 | Everything else | 300 per minute, per IP |
 | Messages (Batch 3) | 30 per minute, per user |
 

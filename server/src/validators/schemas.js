@@ -116,6 +116,10 @@ export const resetPasswordBody = z
   .object({
     token: z.string().trim().min(1).optional(),
     temp_token: z.string().trim().min(1).optional(),
+    // Required by the service on the `temp_token` path only — the temporary
+    // password the account signed in with. Not a `password` because it is
+    // checked against a hash, never set, so the strength rules do not apply.
+    current_password: z.string().min(1).optional(),
     password: password.optional(),
     new_password: password.optional(),
   })

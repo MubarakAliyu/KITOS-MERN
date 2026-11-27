@@ -63,6 +63,9 @@ export const postResetPassword = handle(async (req, res) => {
   const result = await authService.resetPassword({
     token: req.body.token,
     temp_token: req.body.temp_token,
+    // Only the `temp_token` path reads this, and it requires it: the two
+    // doors into a forced reset must not differ in what they ask for.
+    current_password: req.body.current_password,
     password: req.body.password ?? req.body.new_password,
     ip: clientIp(req),
   });

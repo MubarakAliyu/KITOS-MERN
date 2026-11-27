@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { motion } from "motion/react";
 import { useRouter } from "next/navigation";
-import { useSession, signOut } from "next-auth/react";
+import { useSession, signIn, signOut, getSession } from "next-auth/react";
 import { toast } from "sonner";
 import {
   AlertCircle,
@@ -22,18 +22,26 @@ import BrandLockup from "@/_components/auth/BrandLockup";
 import RightPanel from "@/_components/auth/RightPanel";
 import PasswordStrengthBar from "@/_components/auth/PasswordStrengthBar";
 import { changePassword } from "@/_lib/api/settings";
+import { apiErrorMessage, apiFieldErrors } from "@/_lib/api/errors";
+import { roleToPath } from "@/_lib/auth/role-routing";
 
-const DEFAULT_PASSWORD = "default1234";
-
+/**
+ * The rule about `default1234` is gone.
+ *
+ * It was written when every new account got one shared default password. They
+ * have not for some time: `generateTempPassword` issues a random one per
+ * account, and an administrator reads it off the screen. Telling somebody
+ * their new password must differ from a string they have never seen was
+ * noise, and naming the old default in the UI advertised it.
+ */
 const schema = z
   .object({
+    current_password: z
+      .string()
+      .min(1, "Enter the temporary password you signed in with"),
     password: z
       .string()
       .min(8, "Must be at least 8 characters")
-      .refine(
-        (p) => p !== DEFAULT_PASSWORD,
-        "Cannot use the default password"
-      )
       .refine((p) => /[A-Z]/.test(p), "Must contain an uppercase letter")
       .refine((p) => /\d/.test(p), "Must contain a number"),
     confirm: z.string(),
@@ -41,6 +49,10 @@ const schema = z
   .refine((d) => d.password === d.confirm, {
     message: "Passwords do not match",
     path: ["confirm"],
+  })
+  .refine((d) => d.password !== d.current_password, {
+    message: "Choose a password different from the temporary one",
+    path: ["password"],
   });
 
 export default function ForceResetPasswordPage() {
@@ -65,6 +77,7 @@ export default function ForceResetPasswordPage() {
 function ForceResetForm() {
   const router = useRouter();
   const { data: session } = useSession();
+  const [showCurrent, setShowCurrent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -72,17 +85,19 @@ function ForceResetForm() {
     register,
     handleSubmit,
     watch,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm({ resolver: zodResolver(schema), mode: "onTouched" });
 
+  const currentValue = watch("current_password", "");
   const passwordValue = watch("password", "");
   const confirmValue = watch("confirm", "");
 
   const reqs = [
     { label: "At least 8 characters", ok: passwordValue.length >= 8 },
     {
-      label: 'Different from default ("default1234")',
-      ok: passwordValue.length > 0 && passwordValue !== DEFAULT_PASSWORD,
+      label: "Different from the temporary password",
+      ok: passwordValue.length > 0 && passwordValue !== currentValue,
     },
     { label: "Contains uppercase", ok: /[A-Z]/.test(passwordValue) },
     { label: "Contains a number", ok: /\d/.test(passwordValue) },
@@ -92,19 +107,72 @@ function ForceResetForm() {
     },
   ];
 
+  // Students have no email address, so they are known by admission number.
+  const identifier = session?.user?.admission_no || session?.user?.email || "";
+
   const onSubmit = async (values) => {
     try {
       await changePassword({
         temp_token: session?.user?.temp_token,
+        current_password: values.current_password,
         new_password: values.password,
       });
-      // Drop the force-reset session — user logs in fresh with the new
-      // password. We pass ?reset=success so the login page shows a toast.
-      await signOut({ redirect: false });
-      router.replace("/login?reset=success");
-    } catch {
-      toast.error("Couldn't update password — try again");
+    } catch (error) {
+      /**
+       * The server's own message, on the field it belongs to.
+       *
+       * "Couldn't update password — try again" was the only thing this
+       * screen ever said, which is useless advice when the answer is "that
+       * is not the temporary password you signed in with".
+       */
+      const fields = apiFieldErrors(error);
+      for (const [field, message] of Object.entries(fields)) {
+        setError(field, { type: "server", message });
+      }
+      if (Object.keys(fields).length === 0) {
+        /**
+         * The server's own sentence, not a stock one.
+         *
+         * Writing this test turned up a rate-limited response — "Too many
+         * attempts. Please try again later." — that this screen showed as
+         * "try again", advice that was not only unhelpful but wrong.
+         */
+        toast.error(
+          apiErrorMessage(error, "Couldn't update password — try again")
+        );
+      }
+      return;
     }
+
+    /**
+     * The password is set. Now finish the job and sign them in with it.
+     *
+     * The old flow signed out and sent them back to /login to type a password
+     * they had just typed twice. Signing in here lands them on their own
+     * dashboard, which is what "& Continue" on the button promises.
+     *
+     * The force-reset session has to go either way: its token was revoked by
+     * the change (`revokeTokens`), so it would 401 on the first request a
+     * dashboard made.
+     */
+    const signedIn = await signIn("credentials", {
+      identifier,
+      password: values.password,
+      redirect: false,
+    });
+
+    if (signedIn?.ok) {
+      const fresh = await getSession();
+      toast.success("Password set. Welcome in.");
+      router.replace(roleToPath(fresh?.user?.role ?? session?.user?.role));
+      router.refresh();
+      return;
+    }
+
+    // The change went through even if signing in afterwards did not, so send
+    // them to sign in by hand rather than implying the password did not save.
+    await signOut({ redirect: false });
+    router.replace("/login?reset=success");
   };
 
   return (
@@ -127,12 +195,60 @@ function ForceResetForm() {
           strokeWidth={2.5}
         />
         <p className="text-xs text-amber-700 dark:text-amber-300">
-          You&apos;re using the default password. Create a secure password to
-          protect your account.
+          You signed in with a temporary password. Choose one of your own to
+          finish setting up your account.
         </p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4" noValidate>
+        {/*
+          The temporary password, asked for again.
+
+          The API requires it on this path: a change that proves nothing about
+          who is asking is a change anybody holding the page can make. They
+          typed it a moment ago to get here, so it is still to hand.
+        */}
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="current_password"
+            className="text-sm font-semibold text-[#0B1220]"
+          >
+            Temporary password
+          </label>
+          <div className="relative">
+            <input
+              id="current_password"
+              type={showCurrent ? "text" : "password"}
+              autoComplete="current-password"
+              placeholder="The password you just signed in with"
+              aria-invalid={!!errors.current_password}
+              {...register("current_password")}
+              className={`${inputClass(errors.current_password)} pr-10`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowCurrent((v) => !v)}
+              aria-label={
+                showCurrent
+                  ? "Hide temporary password"
+                  : "Show temporary password"
+              }
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600"
+            >
+              {showCurrent ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+          {errors.current_password && (
+            <span className="text-xs font-medium text-red-600">
+              {errors.current_password.message}
+            </span>
+          )}
+        </div>
+
         <div className="flex flex-col gap-1.5">
           <label htmlFor="password" className="text-sm font-semibold text-[#0B1220]">
             New password

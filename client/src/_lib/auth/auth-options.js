@@ -38,7 +38,22 @@ export const authOptions = {
               language_preference: "en",
               must_reset_password: true,
               temp_token: result.temp_token || "",
-              accessToken: result.temp_token || "",
+              /**
+               * No `accessToken` for a must-change account.
+               *
+               * A temp token is single-purpose: the API refuses it as a
+               * Bearer credential, by design. Putting it here made the axios
+               * interceptor attach it to every request, so the force-reset
+               * screen's own POST arrived looking like an authentication
+               * attempt and came back 401 — "a password-reset token cannot
+               * be used to authenticate a request". The user could not set a
+               * password, and so could not sign in at all.
+               *
+               * The token travels in the request body, where it belongs,
+               * and this session has no API credential until there is one
+               * to have.
+               */
+              accessToken: "",
             };
           }
 

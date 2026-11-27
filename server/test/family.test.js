@@ -177,7 +177,11 @@ describe("POST /students — a parent adds a child", () => {
     // Choosing a password completes the flow.
     const reset = await request(server)
       .post("/user/change-password")
-      .send({ temp_token: signIn.body.temp_token, new_password: "ChildPass123" });
+      .send({
+        temp_token: signIn.body.temp_token,
+        current_password: created.body.password,
+        new_password: "ChildPass123",
+      });
     expect(reset.status).toBe(200);
 
     const second = await request(server)
