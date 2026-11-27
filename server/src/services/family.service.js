@@ -9,8 +9,9 @@ import { nextAdmissionNumber } from "../lib/numbering.js";
 import { generateTempPassword } from "../lib/tokens.js";
 import { logActivity } from "../lib/audit.js";
 import { sendMailInBackground, childAccountEmail } from "../lib/mailer.js";
-import { forbidden, notFound, badRequest } from "../lib/errors.js";
+import { forbidden, notFound } from "../lib/errors.js";
 import { avatarInitial } from "../lib/serialize.js";
+import { assertTrackUsable } from "./track.service.js";
 import {
   toTrackSlug,
   toTrackLabel,
@@ -112,12 +113,7 @@ async function enrolmentCounts(studentIds) {
  * @param {{ parent: object, payload: object, ip?: string, userAgent?: string }} input
  */
 export async function addChild({ parent, payload, ip, userAgent }) {
-  const track = toTrackSlug(payload.programme_track);
-  if (!track) {
-    throw badRequest("Validation failed", undefined, {
-      programme_track: "Choose one of the programme tracks",
-    });
-  }
+  const track = await assertTrackUsable(toTrackSlug(payload.programme_track));
 
   const accepted = payload.consent?.accepted === true;
   const tempPassword = generateTempPassword();

@@ -20,6 +20,12 @@ export default function AddModuleModal({
   onClose,
   courseId,
   onCreated,
+  /**
+   * The position to offer, which is the end of the list. It defaulted to 1
+   * however many modules the course had, so adding a second module asked for
+   * position 1 again and the two collided.
+   */
+  nextOrderIndex = 1,
 }) {
   const {
     register,
@@ -28,18 +34,18 @@ export default function AddModuleModal({
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { title: "", order_index: 1 },
+    defaultValues: { title: "", order_index: nextOrderIndex },
   });
 
   useEffect(() => {
     if (!isOpen) return;
-    reset({ title: "", order_index: 1 });
+    reset({ title: "", order_index: nextOrderIndex });
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, onClose, reset]);
+  }, [isOpen, onClose, reset, nextOrderIndex]);
 
   async function onSubmit(values) {
     try {

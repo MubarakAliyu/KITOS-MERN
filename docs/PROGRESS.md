@@ -9,6 +9,57 @@
 
 ## Log
 
+### Production fix — the course editor's edit paths (27 Nov 2026)
+
+The create forms were audited after nine of sixteen admin writes turned out to be failing in
+production. The audit stopped there, and the **edit** paths went on failing the same way.
+
+| What was broken | Why |
+|---|---|
+| Saving a lesson answered 400 "Unrecognized key" | `is_published` was not in the body schema, and the editor sends it on every save — so every save failed, not only the ones that touched the switch |
+| Attaching a resource failed with it | The rail builds `{ id, name, url }`; the API stores `{ title, url }`, so `title` was missing and `id` unrecognised |
+| Choosing File or Link failed with it | The content-type enum was `["video", "text"]` while the editor has offered four kinds all along |
+| Modules could not be edited at all | There was no `PUT /modules/:id`. The editor's delete button and reorder arrows changed React state and never reached the API, so both worked until the page was reloaded |
+| Editing an assignment answered 400 | The modal sends `module_id`, `course_title` and `submissions` back; `.strict()` refused all three |
+| Editing a session answered 400 | The form sends `course_id` even though its course picker is disabled when editing |
+| A second module landed on top of the first | The Add Module form's position field defaults to 1, so two modules shared index 1 — and the arrows, which swap two indices, had nothing to swap |
+| Markdown lessons showed their own source to the children | The student page printed the body as plain text; the editor injected it as HTML. Same stored string, three renderings |
+| The editor's YouTube embeds and code styling vanished on save | The sanitiser allows only `youtube-nocookie.com` frames and strips `style`; the toolbar emitted `youtube.com` and inline styles |
+| Bold and the heading buttons did nothing | `mousedown` on a toolbar button moved focus out of the editable area and collapsed the selection before `execCommand` ran |
+| The lesson editor was unusable on a phone | Its box sits in a scrolling flex column, where a flex item shrinks below its content — it collapsed to about 50px and `overflow-hidden` clipped the editor inside it to a strip one line tall |
+
+Programme tracks became data in the same pass (ADR-039): a `tracks` collection, an admin screen that
+creates, renames and archives them, and four React forms that ask the API instead of each holding
+their own copy of the same three strings. The Mongoose enums on `Course`, `Student` and `Cohort` are
+gone — an enum compiled from a constant would reject every track a manager added — and the service
+checks the collection instead. `ensureTracks()` at boot creates the seeded four and adds an archived
+row for any slug a record still references, so a deployed database needs no migration step.
+
+Lesson content now goes through one renderer in both formats (ADR-040), used by the student page,
+the editor's preview and split panes, and the preview modal.
+
+Two smaller things fixed along the way, both found by testing rather than reported:
+
+- **A draft lesson was still visible to students.** `is_published` had nowhere to be stored, so the
+  switch had never done anything. Drafts are now filtered from the module and lesson reads, answer
+  404 by direct link, and are out of the progress denominator — counting a lesson nobody can open
+  would cap a finished course below 100% and withhold the certificate.
+- **`toPlainText` returned HTML entities.** A track or course named "Scratch & Game Design" was
+  stored as `Scratch &amp; Game Design` and the entity showed on screen; a second save escaped it
+  again. The function produces plain text, which React escapes on output, so it decodes now.
+
+**The broad rate limit was per address.** The end-to-end suite found it: two writes failed in the
+second half of a long run and passed on their own. 300 requests a minute, counted per IP, is about
+twenty-five dashboard loads for an entire KIT centre on one shared connection — so the twenty-sixth
+person was told to slow down for doing nothing. It is keyed on the signed-in session now, the same
+correction the password limit already had; signed-out traffic keeps the IP bucket.
+
+**Tests.** `server/test/edit-paths.test.js` posts every update and delete with the exact payload its
+form builds — 49 cases — which is how the assignment, session and module-collision failures were
+found. `client/e2e/edit-paths.spec.js` drives each edit through the UI at both viewports (20 runs),
+and asserts the writing area is taller than 150px, because a desktop-only run would never have shown
+the mobile collapse. Server: 670 tests. Playwright: the full suite.
+
 ### Production fix — the forced first-login password change (27 Nov 2026)
 
 A new account could not be used. Signing in with a temporary password landed on

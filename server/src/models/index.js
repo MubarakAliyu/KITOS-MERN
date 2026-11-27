@@ -15,6 +15,7 @@ export { Notification } from "./Notification.js";
 
 /** Batch 2 — learning content, assessment, progress and sessions. */
 export { Course } from "./Course.js";
+export { Track } from "./Track.js";
 export { Module } from "./Module.js";
 export { Lesson } from "./Lesson.js";
 export { Quiz } from "./Quiz.js";

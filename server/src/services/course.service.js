@@ -14,6 +14,7 @@ import { Recording } from "../models/Recording.js";
 import { Student } from "../models/Student.js";
 import { User } from "../models/User.js";
 import { notFound, forbidden, badRequest } from "../lib/errors.js";
+import { assertTrackUsable } from "./track.service.js";
 import { searchRegex } from "../lib/pagination.js";
 import { koboToNaira, nairaToKobo, avatarInitial } from "../lib/serialize.js";
 import { sanitizeLessonHtml, toPlainText } from "../lib/sanitizeContent.js";
@@ -132,7 +133,15 @@ async function courseCounts(courseIds) {
       { $group: { _id: "$course_id", count: { $sum: 1 } } },
     ]),
     Lesson.aggregate([
-      { $match: { course_id: { $in: courseIds } } },
+      // Drafts are not counted. A course card promising twelve lessons to a
+      // child who can open ten is the Published switch leaking through a
+      // number instead of through the list.
+      {
+        $match: {
+          course_id: { $in: courseIds },
+          is_published: { $ne: false },
+        },
+      },
       { $group: { _id: "$course_id", count: { $sum: 1 } } },
     ]),
     Enrollment.aggregate([
@@ -293,6 +302,18 @@ export async function listCourses({ user, query = {} }) {
  * `quiz_id` and `assignment_id`, and each lesson a `completed` flag for the
  * asking student.
  */
+/**
+ * Does this reader get to see unpublished lessons?
+ *
+ * Staff do, because they are the ones drafting them. Students and parents do
+ * not — an editor switch that leaves the lesson on the student's timeline is
+ * a switch that does nothing, which is what Published/Draft was before the
+ * field was stored at all.
+ */
+function canSeeDrafts(user) {
+  return user?.role === "admin" || user?.role === "instructor";
+}
+
 export async function listCourseModules({ user, courseId }) {
   const course = await getCourseOrFail(courseId);
   await assertCanReadContent(course, user);
@@ -319,10 +340,13 @@ export async function listCourseModules({ user, courseId }) {
     assignments.map((a) => [String(a.module_id), a])
   );
 
+  const showDrafts = canSeeDrafts(user);
+
   return modules.map((module) => {
     const moduleId = String(module._id);
     const moduleLessons = lessons
       .filter((lesson) => String(lesson.module_id) === moduleId)
+      .filter((lesson) => showDrafts || lesson.is_published !== false)
       .map((lesson) => ({
         ...serializeLesson(lesson),
         completed: completed.has(String(lesson._id)),
@@ -332,6 +356,7 @@ export async function listCourseModules({ user, courseId }) {
       id: moduleId,
       course_id: String(module.course_id),
       title: module.title,
+      description: module.description ?? "",
       order_index: module.order_index,
       lessons: moduleLessons,
       lessons_count: moduleLessons.length,
@@ -361,6 +386,9 @@ export function serializeLesson(lesson, extra = {}) {
     })),
     order_index: lesson.order_index,
     duration_minutes: lesson.duration_minutes ?? null,
+    // `!== false` rather than a plain read: lessons written before the field
+    // existed have no value stored, and those are visible, not drafts.
+    is_published: lesson.is_published !== false,
     ...extra,
   };
 }
@@ -386,9 +414,11 @@ export async function listModuleLessons({ user, moduleId }) {
     completed = new Set(rows.map((r) => String(r.lesson_id)));
   }
 
-  return lessons.map((lesson) =>
-    serializeLesson(lesson, { completed: completed.has(String(lesson._id)) })
-  );
+  return lessons
+    .filter((lesson) => canSeeDrafts(user) || lesson.is_published !== false)
+    .map((lesson) =>
+      serializeLesson(lesson, { completed: completed.has(String(lesson._id)) })
+    );
 }
 
 /**
@@ -406,6 +436,13 @@ export async function getLesson({ user, lessonId }) {
 
   // The same rule as the module list: published, and enrolled.
   if (course) await assertCanReadContent(course, user);
+
+  // A draft lesson is hidden from the course listing, so it must be hidden
+  // from its own URL too — otherwise the link a student was given last week
+  // still opens content that was taken down.
+  if (lesson.is_published === false && !canSeeDrafts(user)) {
+    throw notFound("Lesson not found");
+  }
 
   const student = await studentFor(user);
   let completed = false;
@@ -428,12 +465,9 @@ export async function getLesson({ user, lessonId }) {
 // ── Writes ──────────────────────────────────────────────────────────────────
 
 export async function createCourse({ user, payload }) {
-  const track = toTrackSlug(payload.programme_track);
-  if (!track) {
-    throw badRequest("Validation failed", undefined, {
-      programme_track: "Choose one of the programme tracks",
-    });
-  }
+  // The `tracks` collection is the authority: a slug that has no row, or one
+  // whose row is archived, is refused here rather than by a Mongoose enum.
+  const track = await assertTrackUsable(toTrackSlug(payload.programme_track));
 
   // An instructor creating a course owns it; an admin may name someone.
   const instructorId =
@@ -473,8 +507,11 @@ export async function updateCourse({ user, courseId, payload }) {
   if (payload.price_kobo !== undefined) course.price_kobo = payload.price_kobo;
   else if (payload.price !== undefined) course.price_kobo = nairaToKobo(payload.price);
   if (payload.programme_track !== undefined) {
-    const track = toTrackSlug(payload.programme_track);
-    if (track) course.programme_track = track;
+    // A course already filed under this track keeps it even if the track has
+    // since been archived — only a *change* of track has to be to a live one.
+    const slug = toTrackSlug(payload.programme_track);
+    course.programme_track =
+      slug === course.programme_track ? slug : await assertTrackUsable(slug);
   }
   // Only an admin may reassign a course to a different instructor.
   if (payload.instructor_id !== undefined && user.role === "admin") {
@@ -573,21 +610,106 @@ export async function createModule({ user, payload }) {
     .sort({ order_index: -1 })
     .select("order_index");
 
+  /**
+   * Two modules must not share a position.
+   *
+   * The Add Module form's order field defaults to 1, so adding a second
+   * module without touching it asked for position 1 again. Both ended up at
+   * 1, and the editor's up/down arrows then did nothing at all — they swap
+   * two indices, and swapping 1 with 1 is a no-op that still answers 200.
+   *
+   * A requested position that is already taken is treated as "put it at the
+   * end", which is what someone who left the field alone meant. Moving a
+   * module to a position another one holds is a different verb, and
+   * `updateModule` does it as a swap.
+   */
+  const requested = payload.order_index;
+  const taken =
+    requested !== undefined &&
+    (await Module.exists({ course_id: course._id, order_index: requested }));
+
   const module = await Module.create({
     course_id: course._id,
     title: toPlainText(payload.title, 160),
-    order_index: payload.order_index ?? (last?.order_index ?? 0) + 1,
+    description: toPlainText(payload.description ?? "", 2000),
+    order_index:
+      requested !== undefined && !taken
+        ? requested
+        : (last?.order_index ?? 0) + 1,
   });
 
   return {
     id: String(module._id),
     course_id: String(module.course_id),
     title: module.title,
+    description: module.description ?? "",
     order_index: module.order_index,
     lessons: [],
     lessons_count: 0,
     quiz_id: null,
     assignment_id: null,
+  };
+}
+
+/**
+ * Renames, re-describes or reorders a module.
+ *
+ * There was no endpoint for this at all: the editor's module rows had a
+ * delete button and up/down arrows that only rearranged React state, so a
+ * reorder survived until the next page load and nothing could be renamed.
+ *
+ * Reordering is a swap, not an insert. When a module is given an index another
+ * one already holds, the two trade places, which is what the arrows in the
+ * editor mean and what keeps the course's indices a permutation of 1..n
+ * instead of a list with holes and duplicates in it.
+ */
+export async function updateModule({ user, moduleId, payload }) {
+  const module = await Module.findById(moduleId);
+  if (!module) throw notFound("Module not found");
+
+  const course = await getCourseOrFail(module.course_id);
+  assertCanEditCourse(course, user);
+
+  if (payload.title !== undefined) {
+    module.title = toPlainText(payload.title, 160);
+  }
+  if (payload.description !== undefined) {
+    module.description = toPlainText(payload.description, 2000);
+  }
+
+  if (
+    payload.order_index !== undefined &&
+    payload.order_index !== module.order_index
+  ) {
+    const occupant = await Module.findOne({
+      course_id: module.course_id,
+      order_index: payload.order_index,
+      _id: { $ne: module._id },
+    });
+    if (occupant) {
+      occupant.order_index = module.order_index;
+      await occupant.save();
+    }
+    module.order_index = payload.order_index;
+  }
+
+  await module.save();
+
+  const lessonsCount = await Lesson.countDocuments({ module_id: module._id });
+  const quiz = await Quiz.findOne({ module_id: module._id }).select("_id");
+  const assignment = await Assignment.findOne({ module_id: module._id }).select(
+    "_id"
+  );
+
+  return {
+    id: String(module._id),
+    course_id: String(module.course_id),
+    title: module.title,
+    description: module.description ?? "",
+    order_index: module.order_index,
+    lessons_count: lessonsCount,
+    quiz_id: quiz ? String(quiz._id) : null,
+    assignment_id: assignment ? String(assignment._id) : null,
   };
 }
 
@@ -662,6 +784,7 @@ export async function createLesson({ user, payload }) {
     resources: payload.resources ?? [],
     order_index: payload.order_index ?? (last?.order_index ?? 0) + 1,
     duration_minutes: payload.duration_minutes ?? null,
+    is_published: payload.is_published ?? true,
   });
 
   // A new lesson lowers the percentage for everyone already enrolled.
@@ -687,6 +810,9 @@ export async function updateLesson({ user, lessonId, payload }) {
   if (payload.order_index !== undefined) lesson.order_index = payload.order_index;
   if (payload.duration_minutes !== undefined) {
     lesson.duration_minutes = payload.duration_minutes;
+  }
+  if (payload.is_published !== undefined) {
+    lesson.is_published = payload.is_published;
   }
 
   await lesson.save();

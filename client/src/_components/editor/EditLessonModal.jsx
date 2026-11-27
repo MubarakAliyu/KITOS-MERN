@@ -15,9 +15,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { updateLesson } from "@/_lib/api/lessons";
-import RichLessonEditor, {
-  PreviewPane,
-} from "@/_components/editor/RichLessonEditor";
+import { apiErrorMessage } from "@/_lib/api/errors";
+import LessonContent from "@/_components/content/LessonContent";
+import {
+  youtubeEmbedUrl,
+  youtubeId,
+} from "@/_lib/content/lessonContent";
+import RichLessonEditor from "@/_components/editor/RichLessonEditor";
 
 const CONTENT_TYPES = [
   { key: "video", label: "Video", icon: Film },
@@ -25,14 +29,6 @@ const CONTENT_TYPES = [
   { key: "link", label: "Link", icon: LinkIcon },
   { key: "file", label: "File", icon: Paperclip },
 ];
-
-function youtubeId(url) {
-  if (!url) return null;
-  const match = url.match(
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&?\s/]+)/
-  );
-  return match ? match[1] : null;
-}
 
 export default function EditLessonModal({ lesson, onClose, onSaved }) {
   // Local draft. Persisted on Save; rolls back on close-without-save by
@@ -44,7 +40,7 @@ export default function EditLessonModal({ lesson, onClose, onSaved }) {
   const [orderIndex, setOrderIndex] = useState(1);
   const [isPublished, setIsPublished] = useState(true);
   const [resources, setResources] = useState([]);
-  const [resourceDraft, setResourceDraft] = useState({ name: "", url: "" });
+  const [resourceDraft, setResourceDraft] = useState({ title: "", url: "" });
   const [editorMode, setEditorMode] = useState("edit");
   const [submitting, setSubmitting] = useState(false);
 
@@ -56,8 +52,14 @@ export default function EditLessonModal({ lesson, onClose, onSaved }) {
     setBody(lesson.body_content ?? "");
     setOrderIndex(lesson.order_index ?? 1);
     setIsPublished(lesson.is_published !== false);
-    setResources(lesson.resources ?? []);
-    setResourceDraft({ name: "", url: "" });
+    // `name` is tolerated on the way in for anything that still carries it.
+    setResources(
+      (lesson.resources ?? []).map((r) => ({
+        title: r.title ?? r.name ?? "",
+        url: r.url ?? "",
+      }))
+    );
+    setResourceDraft({ title: "", url: "" });
     setEditorMode("edit");
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
@@ -66,20 +68,29 @@ export default function EditLessonModal({ lesson, onClose, onSaved }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [lesson, onClose]);
 
+  /**
+   * Resources are held as `{ title, url }` — the shape the API stores.
+   *
+   * They used to be built here as `{ id, name, url }`: a React key and a
+   * field name of their own. The API names it `title`, and the save body is
+   * strict, so attaching a resource failed validation twice over — `title`
+   * missing and `id` unrecognised — and took the whole lesson save with it.
+   * Rows that came back from the server did have `title`, and this rail
+   * printed `r.name`, so they showed as blank names.
+   */
   function addResource() {
-    if (!resourceDraft.name.trim() || !resourceDraft.url.trim()) {
+    const title = resourceDraft.title.trim();
+    const url = resourceDraft.url.trim();
+    if (!title || !url) {
       toast.error("Resource name and URL are both required");
       return;
     }
-    setResources((list) => [
-      ...list,
-      { id: `r-${Date.now()}`, ...resourceDraft },
-    ]);
-    setResourceDraft({ name: "", url: "" });
+    setResources((list) => [...list, { title, url }]);
+    setResourceDraft({ title: "", url: "" });
   }
 
-  function removeResource(id) {
-    setResources((list) => list.filter((r) => r.id !== id));
+  function removeResource(index) {
+    setResources((list) => list.filter((_, i) => i !== index));
   }
 
   async function handleSave() {
@@ -90,10 +101,23 @@ export default function EditLessonModal({ lesson, onClose, onSaved }) {
     }
     setSubmitting(true);
     try {
+      /**
+       * Exactly the fields `PUT /lessons/:id` accepts (docs/API.md).
+       *
+       * This is the payload that was failing in production with 400
+       * "Unrecognized key": the body is `.strict()`, and `is_published` and
+       * the resources' `name` were not in it. Adding a YouTube URL, changing
+       * the content type and toggling Published all failed for that one
+       * reason — the switch is sent on every save, so every save failed.
+       *
+       * An empty video field is sent as null, not "": the field is nullable,
+       * and `""` would be stored and then read back as a URL that is present
+       * but unusable.
+       */
       const payload = {
         title: title.trim(),
         content_type: contentType,
-        youtube_url: youtubeUrl.trim(),
+        youtube_url: youtubeUrl.trim() || null,
         body_content: body,
         order_index: Number(orderIndex) || 1,
         is_published: isPublished,
@@ -101,10 +125,15 @@ export default function EditLessonModal({ lesson, onClose, onSaved }) {
       };
       const saved = await updateLesson(lesson.id, payload);
       toast.success("Lesson saved");
+      // The server's copy wins: it has sanitised the body and settled the
+      // resource shape, so showing the draft instead would show something
+      // that is not what was stored.
       onSaved?.({ ...lesson, ...payload, ...saved });
       onClose?.();
-    } catch {
-      toast.error("Couldn't save lesson");
+    } catch (error) {
+      // The server names the field and the reason. "Couldn't save lesson"
+      // was all anyone saw while this endpoint was rejecting every save.
+      toast.error(apiErrorMessage(error, "Couldn't save lesson"));
     } finally {
       setSubmitting(false);
     }
@@ -349,14 +378,14 @@ function SettingsRail({
           </p>
         ) : (
           <ul className="flex flex-col gap-1.5">
-            {resources.map((r) => (
+            {resources.map((r, index) => (
               <li
-                key={r.id}
+                key={`${r.title}-${r.url}`}
                 className="flex items-start gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-2 text-xs"
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold text-[var(--text-primary)]">
-                    {r.name}
+                    {r.title}
                   </p>
                   <p className="truncate text-[var(--text-muted)] font-mono-ui">
                     {r.url}
@@ -364,7 +393,7 @@ function SettingsRail({
                 </div>
                 <button
                   type="button"
-                  onClick={() => removeResource(r.id)}
+                  onClick={() => removeResource(index)}
                   className="grid h-6 w-6 shrink-0 place-items-center rounded text-[var(--text-secondary)] transition-colors hover:bg-red-500/10 hover:text-red-500"
                   aria-label="Remove resource"
                 >
@@ -377,9 +406,9 @@ function SettingsRail({
         <div className="mt-3 flex flex-col gap-2 rounded-xl border border-dashed border-[var(--border-color)] bg-[var(--bg-card)] p-3">
           <input
             type="text"
-            value={resourceDraft.name}
+            value={resourceDraft.title}
             onChange={(e) =>
-              setResourceDraft((r) => ({ ...r, name: e.target.value }))
+              setResourceDraft((r) => ({ ...r, title: e.target.value }))
             }
             placeholder="Resource name"
             className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/20"
@@ -423,7 +452,7 @@ function StudentPreviewRail({ title, body, ytId }) {
             }}
           >
             <iframe
-              src={`https://www.youtube.com/embed/${ytId}`}
+              src={youtubeEmbedUrl(ytId)}
               style={{
                 position: "absolute",
                 top: 0,
@@ -441,7 +470,7 @@ function StudentPreviewRail({ title, body, ytId }) {
       <h1 className="text-lg font-bold text-[var(--text-primary)]">
         {title || "Untitled lesson"}
       </h1>
-      <PreviewPane html={body} />
+      <LessonContent content={body} />
       <div className="mt-auto flex items-center justify-between gap-2 border-t border-[var(--border-color)] pt-3 text-[10px] text-[var(--text-muted)] font-mono-ui">
         <span>← Previous</span>
         <span>Next →</span>

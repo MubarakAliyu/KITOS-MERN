@@ -40,6 +40,7 @@ const ROUTE_TITLE_KEYS = {
   "/admin": "nav.dashboard",
   "/admin/users": "users.userManagement",
   "/admin/courses": "nav.courses",
+  "/admin/tracks": "nav.tracks",
   "/admin/analytics": "analytics.analytics",
   "/admin/payments": "payments.payments",
   "/admin/chat": "chat.monitorTitle",

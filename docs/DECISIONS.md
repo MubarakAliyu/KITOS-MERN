@@ -564,3 +564,93 @@ SMTP configuration is left as it is. Receipts and notifications still attempt Gm
 on Render's free tier; they now fail in the background, logged, where before they took a request
 down with them. Moving to a provider that works from Render (ADR-035 names the constraint) is a
 separate change, and nothing user-facing now depends on it.
+
+---
+
+## ADR-039 — Programme tracks are rows, not a constant
+
+**Status:** accepted · **Date:** 2026-11-27
+
+### Context
+A programme track was three strings — "Scratch Programming", "Web Development", "Robotics Basics" —
+hard-coded in four React forms, a fourth copy of the slugs in `server/src/config/constants.js`, and
+a Mongoose `enum` on `Course`, `Student` and `Cohort`. Opening a track meant editing five files and
+deploying twice, for a decision a centre manager makes. The copies had already drifted: the server
+stores `robotics` and calls it "Robotics", while every form said "Robotics Basics".
+
+### Decision
+Tracks are documents in a `tracks` collection with `name`, `slug`, `description` and `status`, and
+an admin screen at `/admin/tracks` creates, renames and archives them.
+
+Three things make that safe to retrofit onto a database that already has courses and students
+pointing at slugs:
+
+- **The slug is the identity and never moves.** A rename changes `name` only. Renaming "Robotics" to
+  "Robotics & Drones" with a slug rewrite would have to touch three collections inside a transaction
+  to avoid orphaning everything filed under it; keeping the slug makes the rename a one-field write.
+- **The Mongoose enums are gone, and the service checks the collection instead.** An enum compiled
+  from a constant would reject every track a manager added. `assertTrackUsable` reads the row, so an
+  archived track is refused with a message naming the field — a check an enum could not make.
+- **`toTrackLabel` stays synchronous, backed by a registry primed from the collection.** It is called
+  from a dozen serializers and from a Mongoose instance method, none of which can await. The service
+  re-primes the registry after every write, and the collection remains the authority for validation.
+
+Archiving, not deleting, is how a track is retired: it leaves the forms and stays on the records. A
+delete is refused with 409 and the counts while anything references it.
+
+`ensureTracks()` runs at boot. It creates the four tracks this programme already runs, and adds an
+**archived** row for any slug a course or student references that has no row — so a deployed
+database gains its tracks without a migration step, and no record is left filed under a track the
+admin screen does not list.
+
+### Consequences
+Opening a track is a form submission. The forms call `GET /tracks` and offer whatever is active,
+falling back to the three this programme has always run if the request fails — an empty `<select>`
+would block someone over a request the server validates anyway.
+
+---
+
+## ADR-040 — One renderer for lesson content, in both formats
+
+**Status:** accepted · **Date:** 2026-11-27
+
+### Context
+Lesson bodies are stored in two formats and always have been: the rich editor is a
+`contentEditable`, so its output is HTML, while the seeded courses — and anything an instructor
+pasted from notes — are Markdown. Three screens then rendered the same stored string three
+different ways. The editor's preview injected it as HTML, the student's lesson page printed it as
+plain text inside a `<p>`, and the preview modal did a third thing again.
+
+So a Markdown lesson showed "# Introduction" and "**Stage:**" to the children while the
+instructor's preview of the same lesson showed headings and bold. "Student Preview" was not a true
+name for what that pane showed.
+
+### Decision
+One function, `toRenderableHtml` in `client/src/_lib/content/lessonContent.js`: detect whether the
+content is HTML or Markdown, convert Markdown to HTML, sanitise the result. One component,
+`LessonContent`, renders it with one set of styles. The student page, the editor's Preview and
+Split panes and the preview modal all call it, so they cannot drift apart again.
+
+The editor loads content through the same conversion, which is what makes it **save the format it
+displays**: a Markdown lesson is converted once, on open, and the next save stores the HTML that
+was actually on screen.
+
+Two details that are not obvious:
+
+- **The server escapes before this sees it.** `sanitize-html` runs over every body on the way in and
+  escapes bare angle brackets — right for HTML, wrong for Markdown, where `> ` at the start of a
+  line is a blockquote and arrives as `&gt; `. The Markdown pass decodes those entities first.
+- **The editor's inline styles never survived a save.** The sanitiser allows `class` and strips
+  `style`, so the toolbar's inline-styled code blocks and its `youtube.com/embed` iframes — the
+  wrong host — were deleted on save. The instructor saw a video in the editor and the students got
+  nothing. The toolbar now emits classes and the `youtube-nocookie.com` embed the sanitiser keeps.
+
+The client sanitises again, as the second line. The server already sanitises on the way in, but
+Markdown can carry raw HTML inline, and that HTML has never been through the server's pass.
+
+### Consequences
+A small Markdown subset, not CommonMark: headings, bold and italic, lists, links, images, fenced and
+indented code, blockquotes, rules, and a bare YouTube URL on a line of its own. It covers what the
+toolbar produces and what the stored lessons use; anything else degrades to a paragraph of its own
+text rather than disappearing. No dependency was added — `marked` plus `dompurify` is a large amount
+of code to carry for a page that renders one field.

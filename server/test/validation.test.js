@@ -195,6 +195,33 @@ describe("rate limiting", () => {
     const other = await request(limited).post("/login").send({ email: "two@kit.test" });
     expect(other.status).toBe(200);
   });
+
+  /**
+   * The broad ceiling is per signed-in session, not per address.
+   *
+   * It was per address, and a KIT centre is one shared connection: 300
+   * requests a minute divided between everyone in the room is about
+   * twenty-five dashboard loads for the whole centre, after which the next
+   * person is told to slow down for doing nothing. The end-to-end suite hit
+   * the same wall from one address — two writes failed late in a long run
+   * and passed on their own — which is how it was found.
+   */
+  it("gives each signed-in session its own share of the broad ceiling", async () => {
+    const { generalKey } = await import("../src/middleware/rateLimit.js");
+
+    const key = (authorization) =>
+      generalKey({ ip: "102.89.0.1", headers: { authorization } });
+
+    // Two people on one connection do not share a budget.
+    expect(key("Bearer aaa")).not.toBe(key("Bearer bbb"));
+    // The same session keeps its own, so the ceiling still bites.
+    expect(key("Bearer aaa")).toBe(key("Bearer aaa"));
+    // Signed-out traffic is still counted by address, which is where a
+    // flood with no account behind it has to be caught.
+    expect(generalKey({ ip: "102.89.0.1", headers: {} })).toMatch(/^ip:/);
+    // And the token itself never appears in the key.
+    expect(key("Bearer aaa")).not.toContain("aaa");
+  });
 });
 
 describe("environment validation", () => {

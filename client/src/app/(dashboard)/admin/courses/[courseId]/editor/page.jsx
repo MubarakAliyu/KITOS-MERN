@@ -20,6 +20,10 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { updateModule } from "@/_lib/api/courses";
+import { apiErrorMessage } from "@/_lib/api/errors";
+import EditModuleModal from "@/_components/editor/EditModuleModal";
+import DeleteModuleModal from "@/_components/editor/DeleteModuleModal";
 import {
   getCourseEditor,
   publishCourse,
@@ -67,6 +71,8 @@ export default function AdminCourseEditorPage() {
   const [editingAssignment, setEditingAssignment] = useState(null);
   const [reviewing, setReviewing] = useState(null);
 
+  const [editingModule, setEditingModule] = useState(null);
+  const [deletingModule, setDeletingModule] = useState(null);
   const [editingLesson, setEditingLesson] = useState(null);
   const [previewingLesson, setPreviewingLesson] = useState(null);
   const [deletingLesson, setDeletingLesson] = useState(null);
@@ -158,20 +164,60 @@ export default function AdminCourseEditorPage() {
     }
   }
 
-  function moveModule(idx, dir) {
+  /**
+   * Moves a module one place, and keeps it moved.
+   *
+   * This used to reorder React state and nothing else: the arrows worked
+   * until the next page load, and the order students saw never changed.
+   * `PUT /modules/:id` swaps the two indices on the server, so the list is
+   * reordered optimistically and rolled back if the request fails.
+   */
+  async function moveModule(idx, dir) {
+    const target = idx + dir;
+    if (target < 0 || target >= modules.length) return;
+
+    const moving = modules[idx];
+    const displaced = modules[target];
+    const previous = modules;
+
     setModules((list) => {
-      const target = idx + dir;
-      if (target < 0 || target >= list.length) return list;
       const next = [...list];
       [next[idx], next[target]] = [next[target], next[idx]];
       return next.map((m, i) => ({ ...m, order_index: i + 1 }));
     });
+
+    try {
+      await updateModule(moving.id, { order_index: displaced.order_index });
+    } catch (error) {
+      setModules(previous);
+      toast.error(apiErrorMessage(error, "Couldn't reorder the modules"));
+    }
   }
 
-  function deleteModule(moduleId) {
-    if (!confirm("Delete this module? This cannot be undone.")) return;
-    setModules((list) => list.filter((m) => m.id !== moduleId));
-    toast.success("Module deleted");
+  function handleModuleSaved(saved) {
+    setModules((list) =>
+      list
+        .map((m) => {
+          if (m.id === saved.id) return { ...m, ...saved };
+          // The server swaps indices, so the module that was displaced holds
+          // this one's old number now. Re-sorting below puts it in place.
+          const previous = list.find((x) => x.id === saved.id)?.order_index;
+          return m.order_index === saved.order_index
+            ? { ...m, order_index: previous ?? m.order_index }
+            : m;
+        })
+        .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+    );
+  }
+
+  function handleModuleDeleted(deleted) {
+    setModules((list) => list.filter((m) => m.id !== deleted.id));
+    setLessonsByModule((map) => {
+      const next = { ...map };
+      delete next[deleted.id];
+      return next;
+    });
+    setAssignments((list) => list.filter((a) => a.module_id !== deleted.id));
   }
 
   async function handleDeleteQuiz(quizId, moduleId) {
@@ -321,7 +367,8 @@ export default function AdminCourseEditorPage() {
                 assignment={assignments.find((a) => a.module_id === m.id)}
                 onMoveUp={() => moveModule(i, -1)}
                 onMoveDown={() => moveModule(i, 1)}
-                onDelete={() => deleteModule(m.id)}
+                onEdit={() => setEditingModule(m)}
+                onDelete={() => setDeletingModule(m)}
                 onAddLesson={() => setOpenAddLesson(m.id)}
                 onAddQuiz={() => setOpenAddQuiz(m.id)}
                 onAddAssignment={() => setOpenAddAssignment(m.id)}
@@ -341,7 +388,22 @@ export default function AdminCourseEditorPage() {
         )}
       </section>
 
+      <EditModuleModal
+        module={editingModule}
+        onClose={() => setEditingModule(null)}
+        onSaved={handleModuleSaved}
+      />
+
+      <DeleteModuleModal
+        module={deletingModule}
+        onClose={() => setDeletingModule(null)}
+        onDeleted={handleModuleDeleted}
+      />
+
       <AddModuleModal
+        nextOrderIndex={
+          modules.reduce((max, m) => Math.max(max, m.order_index ?? 0), 0) + 1
+        }
         isOpen={openAddModule}
         onClose={() => setOpenAddModule(false)}
         courseId={course.id}
@@ -586,6 +648,7 @@ function ModuleRow({
   assignment,
   onMoveUp,
   onMoveDown,
+  onEdit,
   onDelete,
   onAddLesson,
   onAddQuiz,
@@ -613,9 +676,16 @@ function ModuleRow({
             <ChevronDown className="h-4 w-4 -rotate-90" />
           </motion.span>
         </button>
-        <p className="flex-1 truncate text-sm font-bold text-[var(--text-primary)]">
-          {index + 1}. {module.title}
-        </p>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold text-[var(--text-primary)]">
+            {index + 1}. {module.title}
+          </p>
+          {module.description && (
+            <p className="truncate text-xs text-[var(--text-muted)]">
+              {module.description}
+            </p>
+          )}
+        </div>
         <span className="shrink-0 rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)] font-mono-ui">
           {lessons.length} lessons
         </span>
@@ -646,6 +716,14 @@ function ModuleRow({
           title="Move down"
         >
           <ArrowDown className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="grid h-7 w-7 place-items-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+          title="Edit module"
+        >
+          <Pencil className="h-3.5 w-3.5" />
         </button>
         <button
           type="button"
@@ -680,6 +758,7 @@ function ModuleRow({
                     {lessons.map((l) => (
                       <li
                         key={l.id}
+                        data-testid="lesson-row"
                         className="flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-sm"
                       >
                         <span className="rounded-full bg-[#10B981]/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#10B981] font-mono-ui">

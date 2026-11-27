@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import LessonContent from "@/_components/content/LessonContent";
+import {
+  toEditableHtml,
+  youtubeEmbedHtml,
+} from "@/_lib/content/lessonContent";
 import {
   Bold,
   Code,
@@ -48,11 +53,29 @@ export default function RichLessonEditor({
   // controlled-from-outside value changes while we're not the active
   // editor (e.g. parent reset). We don't re-write the innerHTML on
   // every keystroke — that would move the caret to position 0.
+  /**
+   * Load the stored content into the editable area, once.
+   *
+   * Through `toEditableHtml`, which converts Markdown to HTML. Lessons are
+   * stored in both formats — the seeded ones are Markdown, the editor writes
+   * HTML — and dropping Markdown into a `contentEditable` as `innerHTML`
+   * displays its source, hash marks and asterisks included. Converting on
+   * open also means the next save stores HTML: the editor saves the format it
+   * displays, instead of handing back the Markdown it never rendered.
+   *
+   * Not re-run on every keystroke: rewriting `innerHTML` under the caret
+   * would send it back to position 0.
+   */
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
-    if (el.innerHTML !== (value ?? "")) {
-      el.innerHTML = value ?? "";
+    const html = toEditableHtml(value ?? "");
+    if (el.innerHTML !== html) {
+      el.innerHTML = html;
+      // Tell the parent what is now in the box. Without this, opening a
+      // Markdown lesson and pressing Save with no other change would store
+      // the Markdown again, and the conversion would be undone.
+      if (html !== (value ?? "")) onChange?.(html);
     }
     // Only meant to fire when the controlled value diverges from a
     // non-editor source (initial load / external reset). Local typing
@@ -109,27 +132,45 @@ export default function RichLessonEditor({
     handleInput();
   }
 
+  /**
+   * A YouTube embed the sanitiser will keep.
+   *
+   * It used to insert a `youtube.com/embed/...` iframe with inline styles.
+   * The server allows frames only from `youtube-nocookie.com` and strips
+   * `style`, so the embed was deleted outright on save: the instructor saw a
+   * video in the editor and the students got nothing. `youtubeEmbedHtml`
+   * emits the no-cookie URL and the class the shared renderer styles.
+   */
   function insertYouTube() {
     const url = window.prompt("Enter YouTube URL or video ID:");
     if (!url) return;
-    const match = url.match(
-      /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s]+)/
-    );
-    const videoId = match ? match[1] : url.trim();
-    if (!videoId) {
-      window.alert("Invalid YouTube URL");
+    const html = youtubeEmbedHtml(url.trim());
+    if (!html) {
+      window.alert("That does not look like a YouTube link or video id.");
       return;
     }
-    const embed = `<div class="youtube-embed" style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;margin:16px 0;border-radius:8px;"><iframe src="https://www.youtube.com/embed/${videoId}" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" allowfullscreen></iframe></div>`;
     editorRef.current?.focus();
-    document.execCommand("insertHTML", false, embed);
+    // A paragraph after it, so there is somewhere to carry on typing.
+    document.execCommand("insertHTML", false, `${html}<p><br></p>`);
     handleInput();
   }
 
+  /**
+   * A code block, styled by class rather than by inline style.
+   *
+   * The server's sanitiser allows `class` and strips `style` (it has to:
+   * inline styles are an injection surface). So every inline style this
+   * toolbar used to emit was thrown away on save, and a lesson came back
+   * looking different from the one that was written. The classes here are
+   * the ones `LessonContent` styles, which is also what the preview uses.
+   */
   function insertCodeBlock() {
-    const code = `<pre style="background:#1a2234;color:#e5e7eb;padding:16px;border-radius:8px;overflow-x:auto;font-family:monospace;font-size:14px;margin:12px 0;"><code>// Your code here</code></pre>`;
     editorRef.current?.focus();
-    document.execCommand("insertHTML", false, code);
+    document.execCommand(
+      "insertHTML",
+      false,
+      "<pre><code>// Your code here</code></pre><p><br></p>"
+    );
     handleInput();
   }
 
@@ -172,7 +213,16 @@ export default function RichLessonEditor({
   const charCount = (value ?? "").replace(/<[^>]*>/g, "").length;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--border-color)]">
+    /*
+        `shrink-0` is what makes the writing area the size it says it is.
+        This sits in a scrolling flex column, where a flex item shrinks below
+        its content by default. The box therefore collapsed to whatever space
+        was left over — about 50px on a phone — and, being `overflow-hidden`,
+        clipped the editor inside it to a strip barely one line tall. No
+        `min-height` on the inner element could win that argument: the
+        clipping happens here.
+      */
+      <div className="shrink-0 overflow-hidden rounded-xl border border-[var(--border-color)]">
       <div className="flex flex-wrap items-center gap-1 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
         <div className="mr-2 flex overflow-hidden rounded-lg border border-[var(--border-color)]">
           {MODES.map((m) => (
@@ -203,6 +253,16 @@ export default function RichLessonEditor({
               key={b.title}
               type="button"
               title={b.title}
+              /*
+                Keep the caret where it is.
+                `mousedown` on a button moves focus out of the editable area
+                and collapses the selection, so by the time `click` runs
+                `document.execCommand` has nothing to format. Selecting a
+                word and pressing B did nothing at all; so did putting the
+                caret in a line and pressing H1. Preventing the default on
+                mousedown stops focus leaving, which is the whole of the fix.
+              */
+              onMouseDown={(e) => e.preventDefault()}
               onClick={b.action}
               className={`rounded p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-card)] hover:text-[var(--text-primary)] ${
                 b.className ?? ""
@@ -215,8 +275,15 @@ export default function RichLessonEditor({
       </div>
 
       <div
-        className={`flex ${
-          mode === "split" ? "divide-x divide-[var(--border-color)]" : ""
+        /*
+          Split stacks on a phone. Side by side at 427px gives two ~190px
+          columns, which is not a split view of anything — it is two columns
+          too narrow to read. The divider follows the direction.
+        */
+        className={`flex flex-col sm:flex-row ${
+          mode === "split"
+            ? "divide-y divide-[var(--border-color)] sm:divide-x sm:divide-y-0"
+            : ""
         }`}
       >
         {mode !== "preview" && (
@@ -227,12 +294,12 @@ export default function RichLessonEditor({
             onInput={handleInput}
             onPaste={handlePaste}
             data-placeholder={placeholder}
-            className="prose-style flex-1 min-h-48 max-h-[60vh] overflow-y-auto p-4 text-sm leading-relaxed text-[var(--text-primary)] outline-none empty:before:pointer-events-none empty:before:text-[var(--text-muted)] empty:before:content-[attr(data-placeholder)] [&_h2]:mb-3 [&_h2]:text-xl [&_h2]:font-bold [&_h3]:mb-2 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:rounded-lg [&_pre]:bg-[#1a2234] [&_pre]:p-3 [&_pre]:text-sm [&_img]:max-w-full [&_img]:rounded-lg"
+            className="prose-style flex-1 min-h-[45vh] max-h-[60vh] sm:min-h-48 overflow-y-auto p-4 text-sm leading-relaxed text-[var(--text-primary)] outline-none empty:before:pointer-events-none empty:before:text-[var(--text-muted)] empty:before:content-[attr(data-placeholder)] [&_h2]:mb-3 [&_h2]:text-xl [&_h2]:font-bold [&_h3]:mb-2 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:rounded-lg [&_pre]:bg-[#1a2234] [&_pre]:p-3 [&_pre]:text-sm [&_img]:max-w-full [&_img]:rounded-lg"
           />
         )}
 
         {mode !== "edit" && (
-          <div className="flex-1 min-h-48 max-h-[60vh] overflow-y-auto bg-[var(--bg-secondary)] p-4">
+          <div className="flex-1 min-h-[45vh] max-h-[60vh] overflow-y-auto bg-[var(--bg-secondary)] p-4 sm:min-h-48">
             <p className="mb-3 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] font-mono-ui">
               Student Preview
             </p>
@@ -251,11 +318,13 @@ export default function RichLessonEditor({
   );
 }
 
+/**
+ * Kept as a named export because three screens already import it.
+ *
+ * It is now a thin wrapper over the shared renderer rather than a raw
+ * `dangerouslySetInnerHTML` with its own styles — which is what made the
+ * editor's preview and the student's page disagree about the same lesson.
+ */
 export function PreviewPane({ html }) {
-  return (
-    <div
-      className="prose prose-sm max-w-none text-[var(--text-primary)] [&_h1]:mb-4 [&_h1]:text-2xl [&_h1]:font-bold [&_h2]:mb-3 [&_h2]:text-xl [&_h2]:font-semibold [&_p]:mb-3 [&_p]:leading-relaxed [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_code]:rounded [&_code]:bg-[var(--bg-secondary)] [&_code]:px-1 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-[#1a2234] [&_pre]:p-4 [&_img]:max-w-full [&_img]:rounded-lg [&_a]:text-[#10B981] [&_a]:underline"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
+  return <LessonContent content={html} />;
 }

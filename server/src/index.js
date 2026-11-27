@@ -5,6 +5,7 @@ import { env } from "./config/env.js";
 import { connectDb, disconnectDb } from "./config/db.js";
 import { logger } from "./lib/logger.js";
 import { loadPermissionOverrides } from "./services/settings.service.js";
+import { ensureTracks } from "./services/track.service.js";
 import { startReminderJob, stopReminderJob } from "./jobs/reminders.js";
 import { attachRealtime, detachRealtime } from "./realtime/socket.js";
 import "./models/index.js";
@@ -19,6 +20,17 @@ async function main() {
   // Permission overrides live in the settings singleton and must be in force
   // before the first request is served, not after it.
   await loadPermissionOverrides();
+
+  /**
+   * Programme tracks are rows now, not a constant.
+   *
+   * `ensureTracks` creates the four this programme already runs if they are
+   * missing, adds an archived row for any track a course or student still
+   * references, and primes the slug-to-label registry the serializers read.
+   * It runs on every boot because it is idempotent and because a deployed
+   * database predates the collection.
+   */
+  await ensureTracks();
 
   const app = createApp();
   const server = http.createServer(app);

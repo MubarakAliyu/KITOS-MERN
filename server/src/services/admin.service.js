@@ -10,6 +10,7 @@ import {
 } from "../lib/numbering.js";
 import { generateTempPassword } from "../lib/tokens.js";
 import { logActivity } from "../lib/audit.js";
+import { assertTrackUsable } from "./track.service.js";
 import { searchRegex, toSkipLimit } from "../lib/pagination.js";
 import { badRequest, notFound, conflict } from "../lib/errors.js";
 import { toTrackSlug, toTrackLabel } from "../config/constants.js";
@@ -176,7 +177,9 @@ export async function createUser(input, actor, ip) {
       parent_id: parent._id,
       name: input.name,
       age: input.age,
-      programme_track: toTrackSlug(input.programme_track),
+      programme_track: await assertTrackUsable(
+        toTrackSlug(input.programme_track)
+      ),
       status: priorConsent ? "active" : "pending",
       consent_id: priorConsent?._id ?? null,
     });
@@ -360,7 +363,12 @@ export async function updateUser(id, patch, actor, ip) {
         changed.push("age");
       }
       if (patch.programme_track) {
-        student.programme_track = toTrackSlug(patch.programme_track);
+        const slug = toTrackSlug(patch.programme_track);
+        // Unchanged is always allowed; a move has to be to a live track.
+        student.programme_track =
+          slug === student.programme_track
+            ? slug
+            : await assertTrackUsable(slug);
         changed.push("programme_track");
       }
       if (patch.name !== undefined) student.name = patch.name;

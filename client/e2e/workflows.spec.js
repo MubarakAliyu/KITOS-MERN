@@ -42,7 +42,7 @@ test.describe("admin user management", () => {
     await modal.getByLabel("Age", { exact: true }).fill("11");
     await modal
       .getByLabel("Programme Track")
-      .selectOption("Robotics Basics");
+      .selectOption("Robotics");
     // The parent selector the modal never used to have. Without it the API
     // refused every pupil an administrator tried to create — a pupil
     // belongs to a family, and nothing on this form asked which.
@@ -178,7 +178,7 @@ test.describe("admin course management", () => {
     await modal.getByLabel("Price", { exact: false }).fill("20000");
     // `programme_track` is a required enum on the model, so a course created
     // without it was a 400 — and no course modal collected it.
-    await modal.getByLabel("Programme Track").selectOption("Robotics Basics");
+    await modal.getByLabel("Programme Track").selectOption("Robotics");
     await modal.getByLabel("Instructor").selectOption({ index: 1 });
 
     await modal.getByRole("button", { name: "Create Course" }).click();

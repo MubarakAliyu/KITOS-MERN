@@ -1,6 +1,5 @@
 import mongoose from "mongoose";
 import { serializePlugin } from "../lib/serialize.js";
-import { PROGRAMME_TRACKS } from "../config/constants.js";
 
 /**
  * A bootcamp intake (PRD §8.2) — the physical-world grouping KIT runs in
@@ -10,7 +9,7 @@ const cohortSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   programme_track: {
     type: String,
-    enum: PROGRAMME_TRACKS,
+    // Validated against the `tracks` collection in the service.
     required: true,
     index: true,
   },

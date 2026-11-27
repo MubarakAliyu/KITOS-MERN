@@ -7,6 +7,7 @@ import {
   PASSWORD_RULE,
   PASSWORD_RULE_MESSAGE,
   CONSENT_SCOPES,
+  LESSON_CONTENT_TYPES,
 } from "../config/constants.js";
 
 /**
@@ -323,6 +324,41 @@ export const sendNotificationBody = z
   })
   .passthrough();
 
+// ── Programme tracks ────────────────────────────────────────────
+
+export const listTracksQuery = z.object({
+  /** The admin page asks for archived tracks too; the forms do not. */
+  include_archived: z
+    .preprocess(
+      (v) => (v === "" || v === undefined ? undefined : v),
+      z.enum(["0", "1", "true", "false"])
+    )
+    .optional(),
+});
+
+export const createTrackBody = z
+  .object({
+    name: z
+      .string({ error: "A track name is required" })
+      .trim()
+      .min(2, "Track name must be at least 2 characters")
+      .max(60, "Track name must be 60 characters or fewer"),
+    description: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+/**
+ * `slug` is deliberately absent: it is derived from the name on creation and
+ * never changes, because every course and student stores it.
+ */
+export const updateTrackBody = z
+  .object({
+    name: z.string().trim().min(2).max(60).optional(),
+    description: z.string().trim().max(500).optional(),
+    status: blank(z.enum(["active", "archived"])),
+  })
+  .strict();
+
 // ── Batch 2: courses, modules, lessons ──────────────────────────────────────
 
 const courseTitle = z
@@ -379,21 +415,52 @@ export const createModuleBody = z
   .object({
     course_id: objectIdSchema,
     title: courseTitle,
+    description: z.string().trim().max(2000).optional(),
     order_index: z.coerce.number().int().min(1).optional(),
   })
   .strict();
 
-const lessonResource = z.object({
-  title: z.string().trim().min(1).max(160),
-  url: z.string().trim().url("Enter a valid URL"),
-});
+/** Renaming, re-describing and reordering a module. `course_id` is fixed. */
+export const updateModuleBody = createModuleBody
+  .partial()
+  .omit({ course_id: true })
+  .strict();
+
+/**
+ * An attached resource: a name and a link.
+ *
+ * `name` is accepted alongside `title` because the lesson editor's rail has
+ * always built its rows as `{ id, name, url }`. Sending that shape failed
+ * twice over — `title` missing, `id` unrecognised — and took the whole save
+ * with it. The id is dropped (it is a React key, not data) and `name` is
+ * folded into `title`, so either client works and only one shape is stored.
+ */
+const lessonResource = z
+  .object({
+    id: ignored,
+    title: z.string().trim().min(1).max(160).optional(),
+    name: z.string().trim().min(1).max(160).optional(),
+    url: z.string().trim().url("Enter a valid URL"),
+  })
+  .transform(({ title, name, url }) => ({ title: title ?? name, url }))
+  .refine((r) => Boolean(r.title), {
+    message: "Every resource needs a name",
+    path: ["title"],
+  });
 
 export const createLessonBody = z
   .object({
     module_id: objectIdSchema,
     title: courseTitle,
-    content_type: z.enum(["video", "text"]).optional(),
+    content_type: z.enum(LESSON_CONTENT_TYPES).optional(),
     youtube_url: z.string().trim().max(500).nullish(),
+    /**
+     * The editor's Published/Draft switch. It sent this on every save while
+     * the body was `.strict()` and knew nothing about it, which is why
+     * toggling it — or editing anything at all, since the switch is always
+     * sent — answered 400 "Unrecognized key".
+     */
+    is_published: z.coerce.boolean().optional(),
     // Rich text: length-capped here, sanitised in the service.
     body_content: z.string().max(100000).optional(),
     resources: z.array(lessonResource).max(20).optional(),
@@ -468,9 +535,25 @@ export const createAssignmentBody = z
   })
   .strict();
 
+/**
+ * Editing an assignment.
+ *
+ * `module_id` is omitted as a writable field — an assignment does not move
+ * between modules — but the Edit Assignment modal sends it back, along with
+ * `course_title` and the `submissions` array it is holding for its own
+ * display. Under `.strict()` those three refused the whole request, so
+ * editing an assignment failed exactly as saving a lesson did. They are
+ * accepted and dropped: echoing state back is a reasonable thing for a form
+ * to do, and the server reads none of it.
+ */
 export const updateAssignmentBody = createAssignmentBody
   .partial()
   .omit({ module_id: true })
+  .extend({
+    module_id: ignored,
+    course_title: ignored,
+    submissions: ignored,
+  })
   .strict();
 
 export const submitAssignmentBody = z
@@ -536,9 +619,19 @@ export const createSessionBody = z
   })
   .strict();
 
+/**
+ * Editing a session.
+ *
+ * A session does not change course — the form's course picker is disabled
+ * when editing — but the modal builds one payload for both verbs and so
+ * sends `course_id` back on every save. Under `.strict()` that refused the
+ * whole request, and editing a session failed for a field nobody could even
+ * change. Accepted and dropped, which is what the disabled picker means.
+ */
 export const updateSessionBody = createSessionBody
   .partial()
   .omit({ course_id: true })
+  .extend({ course_id: ignored })
   .strict();
 
 export const cancelSessionBody = z

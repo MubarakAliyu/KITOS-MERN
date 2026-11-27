@@ -160,6 +160,20 @@ const COURSES = [
   },
 ];
 
+/**
+ * Programme tracks, as the API now returns them.
+ *
+ * The forms used to hold three of these as a hard-coded array each. The
+ * labels here match the server's seed: `robotics` is "Robotics", which is
+ * what the forms called "Robotics Basics" while the two were kept by hand.
+ */
+const TRACKS = [
+  { id: "trk-1", name: "Scratch Programming", slug: "scratch", description: "Visual programming for beginners", status: "active", created_at: "2024-01-05T00:00:00Z", courses_count: 1, students_count: 2, cohorts_count: 1, in_use: true },
+  { id: "trk-2", name: "Web Development", slug: "web-development", description: "HTML, CSS and JavaScript", status: "active", created_at: "2024-01-05T00:00:00Z", courses_count: 1, students_count: 1, cohorts_count: 1, in_use: true },
+  { id: "trk-3", name: "Robotics", slug: "robotics", description: "Sensors, motors and logic", status: "active", created_at: "2024-01-05T00:00:00Z", courses_count: 1, students_count: 1, cohorts_count: 0, in_use: true },
+  { id: "trk-4", name: "Advanced Track", slug: "advanced", description: "For pupils who have finished a track", status: "active", created_at: "2024-01-05T00:00:00Z", courses_count: 0, students_count: 1, cohorts_count: 0, in_use: true },
+];
+
 const MODULES = [
   { id: "m1", course_id: "c1", title: "Getting Started", order_index: 1 },
   { id: "m2", course_id: "c1", title: "Basic Blocks", order_index: 2 },
@@ -1530,6 +1544,102 @@ export const handlers = [
   http.post("*/modules", async ({ request }) => {
     const body = await request.json().catch(() => ({}));
     return HttpResponse.json({ id: `m-${Date.now()}`, ...body });
+  }),
+
+  /**
+   * Module edit and delete, which the API gained with the course editor's
+   * module rows. The editor used to reorder and delete modules in React
+   * state only, so there was nothing for these to mirror.
+   */
+  http.put("*/modules/:id", async ({ params, request }) => {
+    const body = await request.json().catch(() => ({}));
+    for (const courseId of Object.keys(INSTRUCTOR_COURSE_MODULES)) {
+      const list = INSTRUCTOR_COURSE_MODULES[courseId];
+      const idx = list.findIndex((m) => m.id === params.id);
+      if (idx >= 0) {
+        list[idx] = { ...list[idx], ...body, id: params.id };
+        return HttpResponse.json(list[idx]);
+      }
+    }
+    return HttpResponse.json({ id: params.id, ...body });
+  }),
+
+  http.delete("*/modules/:id", ({ params }) => {
+    for (const courseId of Object.keys(INSTRUCTOR_COURSE_MODULES)) {
+      const list = INSTRUCTOR_COURSE_MODULES[courseId];
+      const idx = list.findIndex((m) => m.id === params.id);
+      if (idx >= 0) {
+        list.splice(idx, 1);
+        break;
+      }
+    }
+    return HttpResponse.json({ success: true });
+  }),
+
+  // ── Programme tracks ─────────────────────────────────────────
+
+  http.get("*/tracks", ({ request }) => {
+    const url = new URL(request.url);
+    const all =
+      url.searchParams.get("include_archived") === "1" ||
+      url.searchParams.get("include_archived") === "true";
+    return HttpResponse.json(
+      all ? TRACKS : TRACKS.filter((t) => t.status === "active")
+    );
+  }),
+
+  http.post("*/admin/tracks", async ({ request }) => {
+    const body = await request.json().catch(() => ({}));
+    const name = String(body.name ?? "").trim();
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    if (TRACKS.some((t) => t.slug === slug)) {
+      return HttpResponse.json(
+        { error: "A track with that name already exists" },
+        { status: 409 }
+      );
+    }
+    const created = {
+      id: `trk-${Date.now()}`,
+      name,
+      slug,
+      description: body.description ?? "",
+      status: "active",
+      created_at: new Date().toISOString(),
+      courses_count: 0,
+      students_count: 0,
+      cohorts_count: 0,
+      in_use: false,
+    };
+    TRACKS.push(created);
+    return HttpResponse.json(created, { status: 201 });
+  }),
+
+  http.put("*/admin/tracks/:id", async ({ params, request }) => {
+    const body = await request.json().catch(() => ({}));
+    const idx = TRACKS.findIndex((t) => t.id === params.id);
+    if (idx < 0) {
+      return HttpResponse.json({ error: "Track not found" }, { status: 404 });
+    }
+    // The slug never moves on a rename: every course and student stores it.
+    TRACKS[idx] = { ...TRACKS[idx], ...body, slug: TRACKS[idx].slug };
+    return HttpResponse.json(TRACKS[idx]);
+  }),
+
+  http.delete("*/admin/tracks/:id", ({ params }) => {
+    const track = TRACKS.find((t) => t.id === params.id);
+    if (!track) {
+      return HttpResponse.json({ error: "Track not found" }, { status: 404 });
+    }
+    if (track.in_use) {
+      return HttpResponse.json(
+        {
+          error: `${track.name} is used by ${track.courses_count} courses. Archive it instead.`,
+        },
+        { status: 409 }
+      );
+    }
+    TRACKS.splice(TRACKS.indexOf(track), 1);
+    return HttpResponse.json({ success: true });
   }),
 
   http.post("*/lessons", async ({ request }) => {

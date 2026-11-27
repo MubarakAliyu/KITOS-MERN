@@ -75,11 +75,36 @@ export function sanitizeLessonHtml(html) {
  * Strips every tag, for text that is rendered as plain text — titles,
  * instructions, feedback. Keeps the words, drops the markup.
  */
+const TEXT_ENTITIES = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#39;": "'",
+  "&apos;": "'",
+};
+
 export function toPlainText(value, maxLength) {
-  const text = sanitizeHtml(String(value ?? ""), {
+  const stripped = sanitizeHtml(String(value ?? ""), {
     allowedTags: [],
     allowedAttributes: {},
   }).trim();
+
+  /**
+   * Entities come back out as characters.
+   *
+   * `sanitize-html` escapes what it keeps, because its job is to produce
+   * safe *HTML*. This function produces plain text — a course title, a
+   * module name, a programme track — and every caller renders it through
+   * React, which escapes on output. Leaving it escaped stored a track named
+   * "Scratch & Game Design" as "Scratch &amp;amp; Game Design" after two
+   * saves, and showed the ampersand's entity on screen.
+   */
+  const text = stripped.replace(
+    /&(?:amp|lt|gt|quot|#39|apos);/g,
+    (entity) => TEXT_ENTITIES[entity]
+  );
+
   return maxLength ? text.slice(0, maxLength) : text;
 }
 

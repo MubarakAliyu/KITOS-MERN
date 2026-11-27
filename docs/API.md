@@ -477,7 +477,12 @@ and `thumbnail_url`.
 
 ### `GET /courses/:id/modules` — `content.read`
 
-Modules in order, each with `lessons_count`, `quiz_id` and `assignment_id` (null where absent).
+Modules in order, each with `description`, `lessons_count`, `quiz_id` and `assignment_id` (null
+where absent).
+
+**Unpublished lessons are omitted for students and parents.** A lesson with `is_published: false`
+is a draft, and a draft that still shows on the child's timeline is a Published/Draft switch that
+does nothing. Staff see every lesson, because they are the ones writing them.
 
 A draft course 404s for a student rather than 403 — confirming that a draft exists is itself a small
 leak of what the school is preparing. A published course they are not enrolled on is 403.
@@ -486,6 +491,13 @@ leak of what the school is preparing. A published course they are not enrolled o
 
 Lesson bodies are sanitised HTML (ADR-024). `GET /lessons/:id` adds `completed` for a student.
 
+Drafts are filtered here too, and `GET /lessons/:id` answers **404** for a student when the lesson
+is unpublished — a link handed out last week must not still open content that has been taken down.
+
+Stored bodies are Markdown as well as HTML: the seeded courses are Markdown, the rich editor writes
+HTML. The client renders both through one function (ADR-040), so the student page, the editor's
+preview and the preview modal cannot disagree.
+
 ### `POST /courses` · `POST /admin/courses` — `course.create`
 
 ```json
@@ -493,8 +505,13 @@ Lesson bodies are sanitised HTML (ADR-024). `GET /lessons/:id` adds `completed` 
   "instructor_id": "6ada…", "price_kobo": 1500000, "payment_type": "subscription" }
 ```
 
-`programme_track` is one of `scratch`, `web-development`, `robotics`, `advanced`, and also accepts
-the display label the form submits. 201 with the created course.
+`programme_track` is a slug from the `tracks` collection — `scratch`, `web-development`,
+`robotics` and `advanced` are seeded — and also accepts the display name the form submits. It is
+checked against the collection, not against a constant (ADR-039): a slug with no row, or one whose
+row is archived, answers 400 with `fields.programme_track`. 201 with the created course.
+
+Editing a course to a *different* track requires that track to be active; leaving it on the one it
+already has is always allowed, so a course on a retired track stays editable.
 
 ### `PUT /admin/courses/:id` — `course.edit` · `DELETE /admin/courses/:id` — `course.create`
 
@@ -514,7 +531,21 @@ front of children is worse than no listing.
 The whole course tree in one response: modules, their lessons, quizzes and assignments, for the
 editor screen.
 
-### `POST /modules` · `DELETE /modules/:id` — `course.edit`
+### `POST /modules` · `PUT /modules/:id` · `DELETE /modules/:id` — `course.edit`
+
+```json
+{ "course_id": "6ada…", "title": "Getting Started", "description": "…", "order_index": 1 }
+```
+
+`PUT` takes any of `title`, `description` and `order_index`; `course_id` is not writable, because a
+module does not move between courses.
+
+**Reordering is a swap.** Giving a module an `order_index` another module on the same course holds
+trades the two positions, which is what the editor's up/down arrows mean and what keeps a course's
+indices a permutation of 1..n rather than a list with holes and duplicates in it. On **create**, a
+position that is already taken means "put it at the end" instead — the Add Module form's field
+defaults to 1, so without that rule a second module would land on top of the first and the arrows
+would have nothing to swap.
 
 An instructor may only touch a course assigned to them; an admin, any. Deleting a module removes its
 lessons, quizzes and assignments, then recalculates every enrolment on the course — the denominator
@@ -524,10 +555,46 @@ has changed for everyone.
 
 ```json
 { "module_id": "6ada…", "title": "What is Scratch?", "content_type": "text",
-  "body_content": "<p>…</p>", "video_url": null, "order_index": 1 }
+  "youtube_url": null, "body_content": "<p>…</p>", "order_index": 1,
+  "is_published": true,
+  "resources": [{ "title": "Slides", "url": "https://…" }] }
 ```
 
-`content_type` is `text`, `video` or `pdf`. A YouTube URL is normalised to its embed form.
+`content_type` is `video`, `text`, `link` or `file` — the four the lesson editor offers. A YouTube
+URL is normalised to its `youtube-nocookie.com` embed form, which is the only host a lesson body may
+frame.
+
+`is_published` is the editor's Published/Draft switch. It is sent on **every** save, so a body that
+did not name it refused every save with 400 "Unrecognized key" — the failure this endpoint was
+fixed for.
+
+A resource may arrive as `{ "title", "url" }` or as the editor rail's `{ "id", "name", "url" }`; the
+id is dropped and `name` is folded into `title`, so only one shape is ever stored.
+
+The unpublished-lesson rules above apply to the reads.
+
+### `GET /tracks` — any signed-in user
+
+The programme tracks a form may offer, each with `id`, `name`, `slug`, `description`, `status`, the
+`courses_count`, `students_count` and `cohorts_count` that reference it, and `in_use`.
+
+Active tracks only, unless `?include_archived=1` — the admin screen asks for everything, the forms
+ask for what may be chosen today. Readable by every role, because the course forms, the student
+forms and a parent's "add a child" form all need the list and a track name is not sensitive.
+
+### `POST /admin/tracks` · `PUT /admin/tracks/:id` · `DELETE /admin/tracks/:id` — `users.manage`
+
+```json
+{ "name": "Drone Engineering", "description": "Flight, sensors and safety." }
+```
+
+The `slug` is derived from the name on creation and **never changes** — it is what every course,
+student and cohort stores, so a rename that moved it would orphan all of them. `PUT` therefore
+takes `name`, `description` and `status` (`active` or `archived`), and no slug.
+
+A duplicate name answers 409. `DELETE` answers 409 naming the counts when anything still references
+the track, and says to archive it instead; archiving takes a track off the forms while leaving it
+on the records already filed under it. Every one of the three writes an `activity_logs` row.
 
 ### `POST /quizzes` · `PUT /quizzes/:id` · `DELETE /quizzes/:id` — `course.edit`
 
@@ -577,6 +644,11 @@ clears the old grade — it no longer describes what is there.
 Feedback is checked against the positive-language rule (PRD §10): discouraging wording is
 refused with 422 and a suggested rewording rather than silently softened — the instructor decides
 what to say.
+
+`PUT /assignments/:id` accepts and ignores `module_id`, `course_title` and `submissions`. An
+assignment does not move between modules, and the other two are state the Edit Assignment modal
+holds for its own display and sends back; under `.strict()` all three refused the whole request, so
+editing an assignment failed for fields the server never reads.
 
 ### Progress
 
@@ -663,7 +735,10 @@ classes on the courses they are enrolled on, an instructor their own, an admin a
 ### `PUT /sessions/:id` · `POST /sessions/:id/cancel` · `POST /sessions/:id/reschedule` — `session.manage`
 
 The course cannot be changed once a class exists: its register, its recordings and the children who
-can see it all hang off that course. Cancelling takes a `reason` and notifies the enrolled children.
+can see it all hang off that course. `course_id` is therefore accepted and ignored rather than
+refused — the session form disables its course picker when editing but still sends the value, and
+rejecting it made every session edit fail. Cancelling takes a `reason` and notifies the enrolled
+children.
 
 ### `GET /sessions/:id/roster` — `attendance.mark`
 
@@ -1086,7 +1161,14 @@ boot.
 | `POST /login` | 10 per 15 min, per IP **and** identifier |
 | `POST /forgot-password` | 5 per hour, per IP |
 | `POST /reset-password`, `POST /user/change-password` | 10 per hour, per IP **and credential** |
-| Everything else | 300 per minute, per IP |
+| Everything else | 300 per minute, per signed-in session (per IP when signed out) |
 | Messages (Batch 3) | 30 per minute, per user |
+
+The broad ceiling is keyed on the bearer token, not the address, for the reason the password limit
+is: a KIT centre is one shared connection, and 300 requests a minute divided between everyone in
+the room is about twenty-five dashboard loads for the whole centre. Signed-out traffic keeps the IP
+bucket, which is where a flood with no account behind it has to be caught. The token is not
+verified to build the key — it is a bucket, not an authorization decision, and anything sent with a
+forged one still fails `authenticate` a moment later.
 
 Disabled under `NODE_ENV=test`; the limiter itself is covered by its own tests.

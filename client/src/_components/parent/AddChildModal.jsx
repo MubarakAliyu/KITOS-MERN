@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useForm } from "react-hook-form";
+import { useTracks } from "@/_lib/content/useTracks";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Loader2, X } from "lucide-react";
@@ -12,17 +13,25 @@ import { addChild } from "@/_lib/api/parents";
 import { notifyAdmin } from "@/_lib/notifications/adminNotify";
 import { useLiveNotify } from "@/_lib/notifications/liveNotify";
 
-const TRACKS = ["Scratch Programming", "Web Development", "Robotics Basics"];
+/**
+ * Programme tracks come from the API (`useTracks`).
+ *
+ * They were three strings hard-coded here, and in three other forms, and
+ * again on the server. Tracks are rows an administrator manages now, so this
+ * form offers whatever the API lists.
+ */
 
 const schema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters"),
   age: z.coerce.number().int().min(5, "Min age is 5").max(18, "Max age is 18"),
-  programme_track: z.enum(TRACKS, {
-    message: "Choose a programme track",
-  }),
+  programme_track: z
+    .string({ error: "Choose a programme track" })
+    .trim()
+    .min(1, "Choose a programme track"),
 });
 
 export default function AddChildModal({ isOpen, onClose, onCreated }) {
+  const { tracks } = useTracks({ enabled: isOpen });
   const { data: session } = useSession();
   const { notify } = useLiveNotify();
   const {
@@ -147,7 +156,7 @@ export default function AddChildModal({ isOpen, onClose, onCreated }) {
                   <option value="" disabled>
                     Select a track…
                   </option>
-                  {TRACKS.map((t) => (
+                  {tracks.map((t) => (
                     <option key={t} value={t}>
                       {t}
                     </option>
