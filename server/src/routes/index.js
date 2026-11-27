@@ -118,6 +118,21 @@ router.put(
   c.putAdminUser
 );
 
+/**
+ * Issues a new temporary password. Admin only, by role as well as by
+ * permission: `users.manage` is the permission an administrator has, and
+ * naming the role too means a future grant of that permission to anyone
+ * else does not quietly hand out password resets with it.
+ */
+router.post(
+  "/admin/users/:id/reset-password",
+  authenticate,
+  requireRole("admin"),
+  requirePermission("users.manage"),
+  validate({ params: idParamSchema }),
+  c.postResetUserPassword
+);
+
 router.post(
   "/admin/users/activate",
   authenticate,

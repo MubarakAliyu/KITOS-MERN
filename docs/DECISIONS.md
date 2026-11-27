@@ -506,3 +506,61 @@ at the top of `a11y.spec.js`, so nobody reading a green run can mistake its scop
 theme accessible is written up as the first item of post-submission work: it is real, it affects
 real users, and it needs a palette decision rather than a patch.
 
+
+## ADR-038 — Temporary passwords are handed over on screen, and no request waits on email
+**Status:** Accepted (decided by the product owner, 27 Nov 2026).
+
+### The problem
+Creating a user on the live site reported "Couldn't create user" and created the user. A retry
+answered 409 "already registered", and the account appeared on a refresh — so the write had always
+succeeded. What failed was everything after it.
+
+`createUser` emailed the one-time password and **awaited** the send. Render's free tier blocks
+outbound SMTP, and a blocked port does not refuse a connection — it drops the packets. With no
+timeouts set, nodemailer waited on the operating system's default, which is minutes. The browser
+gave up first. The one-time password existed only in the response that never arrived, and the
+server keeps a bcrypt hash, so nobody could recover it: the account was unreachable and there was no
+way to reset it from the product. Two instructor accounts were in exactly that state.
+
+Three separate mistakes compounded, and all three are worth naming because each is the kind that
+looks harmless in review:
+
+1. **A side effect inside the critical path.** Telling somebody about a write is not part of the
+   write. Awaiting it makes the mail server a dependency of account creation.
+2. **No timeout on a network call.** A default of "minutes" is not a default anybody chose.
+3. **A timeout reported as a failure.** The absence of a reply is not a refusal, and the UI stated
+   as fact something it could not know.
+
+### The decision
+**Temporary passwords are never emailed.** The create and reset responses carry the password, and
+the administrator hands it over themselves. This is the smaller attack surface as well as the
+working one: a credential in an inbox outlives its usefulness, and the school's families are
+reached by phone and WhatsApp in practice, not by email.
+
+The UI shows it in `TempPasswordDialog` — large monospace, a Copy button, and no backdrop click, no
+Escape and no timer, because it is the only copy that will ever exist. A toast was the wrong
+container for that: dismissible by accident, stacked behind the next one, gone if the tab is busy.
+
+**`POST /admin/users/:id/reset-password`** issues a new one for any account, ends every session that
+account has, forces a change at next sign-in, and writes `reset_user_password` to `activity_logs`.
+An administrator cannot reset their own row from that screen: the bump invalidates the token the
+screen is holding, so the list refresh 401s, the client redirects, and the dialog holding the new
+password goes with it — locking them out of the account they were fixing. The row is disabled and
+points at Settings, which has a change-password form that keeps the session.
+
+**No request waits on email.** The remaining senders (password reset, child-account notice) go
+through `sendMailInBackground`, which hands the send to `queueMicrotask` and logs a failure rather
+than surfacing it. A notification that did not go out is not a reason to tell somebody their action
+failed. The transport also carries explicit `connectionTimeout`, `greetingTimeout` and
+`socketTimeout`, so a background send to a blocked port gives up in seconds.
+
+**A write that times out is verified before it is called a failure.** `isTimeoutOrNetworkError`
+distinguishes "no reply" from "refused", and the create-user form re-reads the list before
+reporting anything. Nothing waits on email any more, so that path should not recur from this cause —
+it stays because the general case does: a cold server, a dropped connection, a slow link.
+
+### What was not done
+SMTP configuration is left as it is. Receipts and notifications still attempt Gmail and still fail
+on Render's free tier; they now fail in the background, logged, where before they took a request
+down with them. Moving to a provider that works from Render (ADR-035 names the constraint) is a
+separate change, and nothing user-facing now depends on it.

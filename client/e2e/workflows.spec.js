@@ -51,17 +51,108 @@ test.describe("admin user management", () => {
     await modal.getByRole("button", { name: "Create User" }).click();
 
     /**
-     * The password exists in exactly one place: this toast. It is generated
-     * per account, returned once, and never stored in the clear — so if
-     * this stops appearing, an administrator has no way to tell a family
-     * how to sign in.
+     * The password exists in exactly one place: this dialog. It is generated
+     * per account, returned once in the response that creates it, and never
+     * stored in the clear — so if this stops appearing, an administrator has
+     * no way to tell a family how to sign in.
+     *
+     * It used to be a toast, and before that it was emailed. The email is
+     * what broke in production: the request waited on Gmail, Render's free
+     * tier blocks outbound SMTP, and the browser timed out first — so the
+     * account was created and the password was lost with the response that
+     * never arrived. Nothing is emailed now, and nothing waits on email.
      */
-    await expect(page.getByText(/temporary password/i)).toBeVisible({
-      timeout: 20000,
-    });
-    // `.first()`: the name is on the toast and in the table, and a bare
-    // locator matching both is a strict-mode violation rather than a pass.
+    const credentials = page.getByRole("dialog", { name: /account created/i });
+    await expect(credentials).toBeVisible({ timeout: 20000 });
+    await expect(credentials.getByText(/temporary password/i)).toBeVisible();
+    // The shape `generateTempPassword` produces: KIT, five letters, three
+    // digits, from alphabets with no 0/O/1/l/I to misread over the phone.
+    await expect(credentials.locator("code")).toHaveText(
+      /^KIT[A-Za-z]{5}[2-9]{3}$/
+    );
+    await expect(
+      credentials.getByText(/won't be shown again/i)
+    ).toBeVisible();
+
+    // It closes on Done and on nothing else — not a backdrop click, not
+    // Escape, not a timer.
+    await page.keyboard.press("Escape");
+    await credentials.locator("code").click();
+    await expect(credentials).toBeVisible();
+
+    await credentials.getByRole("button", { name: "Done" }).click();
+    await expect(credentials).toBeHidden();
+
+    // And the list shows the new account without a page reload.
     await expect(page.getByText(name).first()).toBeVisible({ timeout: 20000 });
+
+    expect(errors()).toEqual([]);
+  });
+
+  /**
+   * The recovery path, which is why this was wanted at once: two instructor
+   * accounts existed with passwords nobody had.
+   */
+  test("resets a user's password and shows the new one", async ({ page }) => {
+    test.setTimeout(120000);
+    const errors = collectErrors(page);
+
+    // `window.confirm` is auto-dismissed by Playwright unless something
+    // accepts it, which would silently make this test pass without ever
+    // resetting anything.
+    page.on("dialog", (d) => d.accept());
+
+    await signIn(page, "admin");
+    await page.goto("/admin/users");
+
+    /**
+     * An account of this test's own, created here and reset here.
+     *
+     * Not a seeded one: a reset invalidates that account's password, and the
+     * other specs sign in as the seeded instructor with the password `npm run
+     * seed` printed. Resetting it would leave this test green and break every
+     * spec that ran after it, which is worse than no test at all.
+     *
+     * Not the administrator's own row either. That reset invalidates the
+     * token this screen is holding, so the list refresh 401s, the client goes
+     * to /login, and the dialog holding the new password goes with it — the
+     * administrator locked out of the account they were fixing. The screen
+     * disables your own row for that reason.
+     */
+    const subject = `E2E Reset ${stamp()}`;
+    await page.getByRole("button", { name: "Add User" }).click();
+    const modal = dialog(page);
+    await modal.getByLabel("Full Name").fill(subject);
+    await modal.getByLabel("Role", { exact: true }).selectOption("instructor");
+    await modal
+      .getByLabel("Email", { exact: true })
+      .fill(`e2e.reset.${Date.now()}@example.com`);
+    await modal.getByRole("button", { name: "Create User" }).click();
+
+    const created = page.getByRole("dialog", { name: /account created/i });
+    await expect(created).toBeVisible({ timeout: 20000 });
+    const firstPassword = await created.locator("code").innerText();
+    await created.getByRole("button", { name: "Done" }).click();
+
+    const row = page.locator("tbody tr").filter({ hasText: subject }).first();
+    await expect(row).toBeVisible({ timeout: 20000 });
+    await row.getByRole("button", { name: "Reset password" }).click();
+
+    const credentials = page.getByRole("dialog", {
+      name: /new temporary password/i,
+    });
+    await expect(credentials).toBeVisible({ timeout: 20000 });
+    await expect(credentials.locator("code")).toHaveText(
+      /^KIT[A-Za-z]{5}[2-9]{3}$/
+    );
+    // A reset that hands back the same password has reset nothing.
+    await expect(credentials.locator("code")).not.toHaveText(firstPassword);
+    await expect(
+      credentials.getByText(/won't be shown again/i)
+    ).toBeVisible();
+
+    await credentials.getByRole("button", { name: "Done" }).click();
+    await expect(credentials).toBeHidden();
 
     expect(errors()).toEqual([]);
   });

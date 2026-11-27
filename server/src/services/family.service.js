@@ -8,7 +8,7 @@ import { Notification } from "../models/Notification.js";
 import { nextAdmissionNumber } from "../lib/numbering.js";
 import { generateTempPassword } from "../lib/tokens.js";
 import { logActivity } from "../lib/audit.js";
-import { sendMail, childAccountEmail } from "../lib/mailer.js";
+import { sendMailInBackground, childAccountEmail } from "../lib/mailer.js";
 import { forbidden, notFound, badRequest } from "../lib/errors.js";
 import { avatarInitial } from "../lib/serialize.js";
 import {
@@ -214,13 +214,20 @@ export async function addChild({ parent, payload, ip, userAgent }) {
   }
 
   if (parent.email) {
-    const message = childAccountEmail({
-      parentName: parent.name,
-      childName: student.name,
-      admissionNo,
-      tempPassword,
-    });
-    await sendMail({ to: parent.email, ...message });
+    // Background, and without the password: the parent is looking at it on
+    // screen right now (it is in this function's return value), and no
+    // request may wait on a mail server.
+    sendMailInBackground(
+      {
+        to: parent.email,
+        ...childAccountEmail({
+          parentName: parent.name,
+          childName: student.name,
+          admissionNo,
+        }),
+      },
+      "child account created"
+    );
   }
 
   await logActivity({

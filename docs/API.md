@@ -191,13 +191,35 @@ and the reset-token fields are never serialised anywhere.
 required for a student. A track may be a slug (`web-development`) or the label the form submits
 (`Web Development`).
 
-**201** — the user row plus `"password": "KITeSsjb577"`, the one-time password, **returned once** and
-never stored in the clear or logged (ADR-017). The account carries `must_reset_password: true`.
+**201** — the user row plus `"password": "KITeSsjb577"` and the same value as `temporary_password`,
+the one-time password, **returned once** and never stored in the clear or logged (ADR-017). The
+account carries `must_reset_password: true`.
+
+Nothing is emailed. The password reaches the administrator in this response and nowhere else — the
+UI shows it in a dialog that closes only on "Done" (ADR-038). Earlier versions emailed it, and that
+is what broke the endpoint in production: the request waited on Gmail, Render's free tier blocks
+outbound SMTP, the browser timed out first, and the password was lost with a response that never
+arrived while the account sat created.
 
 Students get an admission number from an atomic counter, so parallel creates cannot collide. A student
 is `active` if the parent has already consented and `pending` otherwise.
 
 409 on a duplicate email.
+
+### `POST /admin/users/:id/reset-password`
+
+No body.
+
+**200** — `{ id, name, email, admission_no, role, must_reset_password: true, password, temporary_password }`,
+where `password` and `temporary_password` are the same newly generated one-time password, returned
+once. The account's old password stops working immediately and `token_version` is incremented, which
+ends every session it has. Writes `reset_user_password` to `activity_logs`, naming the target but
+never the password.
+
+Admin only (`users.manage`). 404 for an unknown id.
+
+An administrator cannot usefully reset their own password here — it invalidates the token the screen
+is holding — so the UI disables that row and points to Settings.
 
 ### `PUT /admin/users/:id`
 

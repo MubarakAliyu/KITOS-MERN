@@ -132,6 +132,21 @@ export const putAdminUser = handle(async (req, res) => {
   res.status(200).json(updated);
 });
 
+/**
+ * `POST /admin/users/:id/reset-password` — a new one-time password.
+ *
+ * Answers with the password in the body, exactly like create does, so the
+ * same dialog can show it. Nothing is emailed.
+ */
+export const postResetUserPassword = handle(async (req, res) => {
+  const result = await adminService.resetUserPassword(
+    req.params.id,
+    actorOf(req),
+    clientIp(req)
+  );
+  res.status(200).json(result);
+});
+
 export const postActivateUser = handle(async (req, res) => {
   const result = await adminService.setUserActive(
     req.body.user_id,

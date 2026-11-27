@@ -10,11 +10,6 @@ import {
 } from "../lib/numbering.js";
 import { generateTempPassword } from "../lib/tokens.js";
 import { logActivity } from "../lib/audit.js";
-import {
-  sendMail,
-  accountCreatedEmail,
-  childAccountEmail,
-} from "../lib/mailer.js";
 import { searchRegex, toSkipLimit } from "../lib/pagination.js";
 import { badRequest, notFound, conflict } from "../lib/errors.js";
 import { toTrackSlug, toTrackLabel } from "../config/constants.js";
@@ -186,16 +181,17 @@ export async function createUser(input, actor, ip) {
       consent_id: priorConsent?._id ?? null,
     });
 
-    if (parent.email) {
-      const message = childAccountEmail({
-        parentName: parent.name,
-        childName: user.name,
-        admissionNo,
-        tempPassword,
-      });
-      await sendMail({ to: parent.email, ...message });
-    }
-
+    /**
+     * No email, and no password in one.
+     *
+     * A temporary password is handed over by the administrator who created
+     * the account — they are standing in front of the person, or they know
+     * how to reach them. Putting it in an email makes a second copy that
+     * sits in an inbox for years, and made the request wait on a mail
+     * server that Render's free tier cannot reach at all. The parent still
+     * gets the notification below, which is the part that is useful without
+     * being a credential.
+     */
     await Notification.create({
       user_id: parent._id,
       type: "account_created",
@@ -206,25 +202,6 @@ export async function createUser(input, actor, ip) {
         "They will be prompted to set a new password on first login.",
       link: "/parent/children",
     });
-  }
-
-  /**
-   * An account with its own address is told its own password.
-   *
-   * Only a child's parent was ever emailed, so a new instructor or parent
-   * had to be read their temporary password out loud from the toast. The
-   * password is still returned once in the response — the email is a second
-   * copy, not a replacement, because mail can bounce and the administrator
-   * is standing there now.
-   */
-  if (user.email) {
-    const message = accountCreatedEmail({
-      name: user.name,
-      role,
-      identifier: user.email,
-      tempPassword,
-    });
-    await sendMail({ to: user.email, ...message });
   }
 
   await logActivity({
@@ -252,6 +229,67 @@ export async function createUser(input, actor, ip) {
     // The same value under the name the Add User modal reads. Both are
     // returned rather than renaming one, because `password` is the key
     // docs/API.md has always documented and something may depend on it.
+    temporary_password: tempPassword,
+  };
+}
+
+/**
+ * Issues a new temporary password for an account, and forces a change.
+ *
+ * The recovery path for "the password was never written down" — which this
+ * system managed to create for itself: creating a user used to wait on an
+ * email that Render's free tier cannot send, so the request timed out, the
+ * account existed, and the one-time password went down with the response
+ * that never arrived.
+ *
+ * It is deliberately not a way to read an existing password. There is no
+ * such way: only a bcrypt hash is stored. This replaces the hash, hands back
+ * a new password once, and bumps `token_version` so every session that
+ * account already had stops working — a password reset that leaves the old
+ * sessions signed in is not a reset.
+ *
+ * Returned once, never emailed, never logged. The audit row records that a
+ * reset happened and by whom, which is the part worth keeping.
+ *
+ * @param {string} id The account to reset.
+ * @param {object} actor The administrator doing it.
+ * @param {string} [ip]
+ */
+export async function resetUserPassword(id, actor, ip) {
+  // `token_version` is `select: false`, so without asking for it the
+  // increment below would start from undefined and the bump would be lost —
+  // leaving the account's existing sessions alive after a reset.
+  const user = await User.findById(id).select("+token_version +password_hash");
+  if (!user) throw notFound("User not found");
+
+  const tempPassword = generateTempPassword();
+  user.password_hash = await hashPassword(tempPassword);
+  user.must_reset_password = true;
+  // Ends every existing session for this account.
+  user.token_version = (user.token_version ?? 0) + 1;
+  user.reset_token_hash = null;
+  user.reset_token_expires_at = null;
+  await user.save();
+
+  await logActivity({
+    actor,
+    action: "reset_user_password",
+    description: `Issued a new temporary password for ${user.name}`,
+    target_type: "user",
+    target_id: String(user._id),
+    meta: { role: user.role, admission_no: user.admission_no ?? null },
+    ip,
+  });
+
+  return {
+    id: String(user._id),
+    name: user.name,
+    email: user.email ?? null,
+    admission_no: user.admission_no ?? null,
+    role: user.role,
+    must_reset_password: true,
+    // Shown once. The same two keys as createUser, so one dialog reads both.
+    password: tempPassword,
     temporary_password: tempPassword,
   };
 }

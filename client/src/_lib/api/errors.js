@@ -94,3 +94,29 @@ export function apiFieldErrors(error) {
     )
   );
 }
+
+/**
+ * Did this request fail without the server ever answering?
+ *
+ * A timeout or a dropped connection is not a refusal — it is the absence of
+ * a reply, and the write on the other end may well have succeeded. Creating
+ * a user did exactly that: the account was written, the request then waited
+ * on an email Render could not send, and the browser gave up first. The
+ * administrator was told "Couldn't create user" about a user who existed,
+ * and a retry answered 409 "already registered".
+ *
+ * Callers use this to go and look before reporting a failure.
+ */
+export function isTimeoutOrNetworkError(error) {
+  if (error?.response) return false;
+  return (
+    error?.code === "ECONNABORTED" ||
+    error?.code === "ETIMEDOUT" ||
+    error?.code === "ERR_NETWORK" ||
+    /timeout|network error/i.test(error?.message ?? "")
+  );
+}
+
+/** What to say when a write may have gone through after all. */
+export const UNCERTAIN_WRITE_MESSAGE =
+  "The server did not answer in time. Checking whether it went through…";

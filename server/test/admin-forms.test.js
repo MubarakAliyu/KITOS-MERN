@@ -1,11 +1,21 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import request from "supertest";
-import { app, makeUser, makeFamily, auth, resetState } from "./helpers.js";
+import {
+  app,
+  makeUser,
+  makeFamily,
+  auth,
+  resetState,
+  missingId,
+  PASSWORD,
+} from "./helpers.js";
 import { Course } from "../src/models/Course.js";
 import { Module } from "../src/models/Module.js";
 import { Assignment } from "../src/models/Assignment.js";
 import { Session } from "../src/models/Session.js";
 import { User } from "../src/models/User.js";
+import { ActivityLog } from "../src/models/ActivityLog.js";
+import { resetEnvCache } from "../src/config/env.js";
 
 /**
  * Every admin and instructor write, posted with **the exact payload its form
@@ -535,5 +545,191 @@ describe("the session form", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.fields?.meeting_url).toBeTruthy();
+  });
+});
+
+/**
+ * Temporary passwords: handed over once, on screen, never emailed
+ * (production fix).
+ *
+ * Creating a user used to wait on an email. Render's free tier blocks
+ * outbound SMTP, and a blocked port drops packets rather than refusing the
+ * connection, so the request hung on the operating system's default socket
+ * timeout — minutes — while the account sat written in the database. The
+ * browser gave up first: the administrator was told "Couldn't create user"
+ * about a user who existed, a retry answered 409, and the one-time password
+ * went down with the response that never came.
+ */
+describe("temporary passwords", () => {
+  it("hands the password back in the response, and emails nobody", async () => {
+    const admin = await makeUser({ role: "admin" });
+
+    const res = await post(admin, "/admin/users", {
+      name: "Hauwa Bello",
+      role: "instructor",
+      email: "hauwa.bello@example.com",
+      bio: null,
+    });
+
+    expectOk(res);
+    expect(res.body.temporary_password).toMatch(/^KIT/);
+    // The dialog reads either key, so both must be the same password.
+    expect(res.body.password).toBe(res.body.temporary_password);
+  });
+
+  /**
+   * The fix, stated as a property: no request may wait on email.
+   *
+   * `/forgot-password` is the remaining route that sends mail, now via
+   * `sendMailInBackground`. The mail server here is a port nothing listens
+   * on, which is as close as a test gets to a blocked one. Without the
+   * background send and the transport timeouts, this waits as long as the
+   * socket does.
+   */
+  it("answers a password-reset request without waiting for the mail server", async () => {
+    const user = await makeUser({ role: "instructor" });
+
+    process.env.SMTP_HOST = "127.0.0.1";
+    // Nothing listens here, and nothing is going to answer.
+    process.env.SMTP_PORT = "2";
+    resetEnvCache();
+
+    try {
+      const started = Date.now();
+      const res = await request(server)
+        .post("/forgot-password")
+        .send({ email: user.email });
+      const elapsed = Date.now() - started;
+
+      expect(res.status).toBe(200);
+      // Well inside the browser's 20s, and nowhere near the minutes an
+      // unanswered SMTP connection takes.
+      expect(elapsed).toBeLessThan(5000);
+    } finally {
+      delete process.env.SMTP_HOST;
+      delete process.env.SMTP_PORT;
+      resetEnvCache();
+    }
+  });
+
+  it("issues a new temporary password and forces a change", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const teacher = await makeUser({ role: "instructor" });
+
+    const res = await post(admin, `/admin/users/${teacher._id}/reset-password`);
+
+    expectOk(res, 200);
+    expect(res.body.temporary_password).toMatch(/^KIT/);
+    expect(res.body.password).toBe(res.body.temporary_password);
+    expect(res.body.must_reset_password).toBe(true);
+
+    const stored = await User.findById(teacher._id).select("+password_hash");
+    expect(stored.must_reset_password).toBe(true);
+    // Returned once, never stored in the clear.
+    expect(stored.password_hash).not.toContain(res.body.temporary_password);
+  });
+
+  it("lets the account sign in with the new password and refuses the old one", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const teacher = await makeUser({ role: "instructor" });
+
+    const res = await post(admin, `/admin/users/${teacher._id}/reset-password`);
+
+    const stale = await request(server)
+      .post("/login")
+      .send({ identifier: teacher.email, password: PASSWORD });
+    expect(stale.status).toBe(401);
+
+    const fresh = await request(server)
+      .post("/login")
+      .send({ identifier: teacher.email, password: res.body.password });
+    expect(fresh.status).toBe(200);
+    // A forced change hands back a single-purpose token, not a session.
+    expect(fresh.body.must_reset_password).toBe(true);
+  });
+
+  /**
+   * A reset that leaves the old sessions signed in is not a reset.
+   *
+   * `token_version` is `select: false`, so a service that forgets to ask for
+   * it increments from `undefined` and the bump is silently lost — the
+   * account's existing tokens keep working.
+   */
+  it("signs the account out everywhere", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const teacher = await makeUser({ role: "instructor" });
+    const before = await User.findById(teacher._id).select("+token_version");
+
+    await post(admin, `/admin/users/${teacher._id}/reset-password`);
+
+    const after = await User.findById(teacher._id).select("+token_version");
+    expect(after.token_version).toBe((before.token_version ?? 0) + 1);
+
+    // The token minted before the reset is now worthless.
+    const res = await request(server).get("/user/me").set(auth(teacher));
+    expect(res.status).toBe(401);
+  });
+
+  it("gives a different password each time", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const teacher = await makeUser({ role: "instructor" });
+
+    const first = await post(
+      admin,
+      `/admin/users/${teacher._id}/reset-password`
+    );
+    const second = await post(
+      admin,
+      `/admin/users/${teacher._id}/reset-password`
+    );
+
+    expect(first.body.password).not.toBe(second.body.password);
+  });
+
+  it("writes an audit row naming who did it, and not the password", async () => {
+    const admin = await makeUser({ role: "admin" });
+    const teacher = await makeUser({ role: "instructor" });
+
+    const res = await post(admin, `/admin/users/${teacher._id}/reset-password`);
+
+    const entry = await ActivityLog.findOne({ action: "reset_user_password" });
+    expect(entry).toBeTruthy();
+    expect(entry.actor_name).toBe(admin.name);
+    expect(entry.description).toContain(teacher.name);
+    // The log records that a reset happened, never the credential.
+    expect(JSON.stringify(entry.toObject())).not.toContain(res.body.password);
+  });
+
+  it.each(["instructor", "parent", "student"])(
+    "refuses a %s resetting anyone's password",
+    async (role) => {
+      const actor = await makeUser({ role });
+      const victim = await makeUser({ role: "instructor" });
+
+      const res = await post(
+        actor,
+        `/admin/users/${victim._id}/reset-password`
+      );
+
+      expect(res.status).toBe(403);
+    }
+  );
+
+  it("refuses an unauthenticated reset", async () => {
+    const victim = await makeUser({ role: "instructor" });
+
+    const res = await request(server).post(
+      `/admin/users/${victim._id}/reset-password`
+    );
+
+    expect(res.status).toBe(401);
+  });
+
+  it("404s for an account that does not exist", async () => {
+    const admin = await makeUser({ role: "admin" });
+
+    const res = await post(admin, `/admin/users/${missingId()}/reset-password`);
+
+    expect(res.status).toBe(404);
   });
 });

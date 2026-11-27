@@ -32,6 +32,17 @@ export const assignInstructor = (data) =>
 export const createUser = (data) =>
   apiClient.post("/admin/users", data).then((r) => r.data);
 
+/**
+ * Issues a new temporary password for an account (admin only).
+ *
+ * Returns the password in the body — once. Nothing emails it, and nothing
+ * stores the plain text, so a caller that drops this response has lost it.
+ */
+export const resetUserPassword = (id) =>
+  apiClient
+    .post(`/admin/users/${id}/reset-password`)
+    .then((r) => r.data);
+
 export const getNextAdmissionNo = () =>
   apiClient.get("/admin/next-admission-no").then((r) => r.data);
 

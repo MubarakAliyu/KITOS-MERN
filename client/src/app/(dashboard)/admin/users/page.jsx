@@ -13,6 +13,8 @@ import {
   Pencil,
   Plus,
   Search,
+  KeyRound,
+  Loader2,
   Users,
 } from "lucide-react";
 import {
@@ -20,11 +22,15 @@ import {
   getAdminCourses,
   getAdminUsers,
   getPendingEnrollments,
+  resetUserPassword,
 } from "@/_lib/api/admin";
+import { apiErrorMessage } from "@/_lib/api/errors";
 import UserDetailModal from "@/_components/admin/UserDetailModal";
 import DeactivateConfirmModal from "@/_components/admin/DeactivateConfirmModal";
 import AssignInstructorModal from "@/_components/admin/AssignInstructorModal";
 import CreateUserModal from "@/_components/admin/CreateUserModal";
+import TempPasswordDialog from "@/_components/admin/TempPasswordDialog";
+import { useSession } from "next-auth/react";
 import { useLiveNotify } from "@/_lib/notifications/liveNotify";
 
 const ROLE_TONE = {
@@ -58,7 +64,30 @@ export default function AdminUsersPage() {
   const [openCreate, setOpenCreate] = useState(false);
   const [createDefaults, setCreateDefaults] = useState(null);
   const [userToEdit, setUserToEdit] = useState(null);
+  /**
+   * The temporary password to show, and the row waiting on a reset.
+   *
+   * `credentials` is the only copy that will ever exist — the server keeps a
+   * hash and returns the plain text once — so it lives in state until the
+   * administrator clicks Done, not in a toast that slides away.
+   */
+  const [credentials, setCredentials] = useState(null);
+  const [resetting, setResetting] = useState(null);
   const { notify } = useLiveNotify();
+  const { data: session } = useSession();
+  /**
+   * Resetting your own password from here would sign you out mid-flight.
+   *
+   * The reset increments `token_version`, which invalidates the token
+   * this screen is holding. The list refresh that follows then answers
+   * 401, the client redirects to /login, and the dialog — the only place
+   * the new password exists — goes with it. The administrator ends up
+   * locked out of the account they were trying to fix.
+   *
+   * So your own row cannot be reset from here. Settings has a change
+   * -password form that keeps you signed in.
+   */
+  const selfId = session?.user?.id ?? null;
 
   const pathname = usePathname();
 
@@ -139,11 +168,73 @@ export default function AdminUsersPage() {
     }
   }
 
+  /**
+   * Re-reads the user list from the API.
+   *
+   * Used after a create and as the recovery path when a write appears to
+   * fail: a request that times out has very often succeeded, and the only
+   * way to know is to look. Returns the list so a caller can decide what
+   * happened.
+   */
+  async function refreshUsers() {
+    const [u, p] = await Promise.all([
+      getAdminUsers(),
+      getPendingEnrollments().catch(() => null),
+    ]);
+    setUsers(u);
+    if (p) setPending(p);
+    return u;
+  }
+
   function handleProvisioned(created, pendingId) {
     setUsers((prev) => [created, ...prev]);
     if (pendingId) setPending((prev) => prev.filter((p) => p.id !== pendingId));
     setCreateDefaults(null);
     notify("user_created", { name: created?.name });
+
+    /**
+     * The password, in a dialog the administrator has to dismiss.
+     *
+     * Not a toast. This is the only copy there will ever be, and a toast
+     * disappears on a timer whether or not anybody read it.
+     */
+    const password = created?.temporary_password ?? created?.password;
+    if (password) {
+      setCredentials({
+        name: created.name,
+        identifier: created.admission_no ?? created.email ?? null,
+        password,
+        title: "Account created",
+      });
+    }
+
+    // And make sure the row on screen is the row the API has, without a
+    // page reload.
+    refreshUsers().catch(() => {});
+  }
+
+  /**
+   * Issues a new temporary password.
+   *
+   * The recovery path for a password nobody wrote down — including the ones
+   * lost to the create-user timeout this change fixes.
+   */
+  async function handleResetPassword(user) {
+    setResetting(user.id);
+    try {
+      const result = await resetUserPassword(user.id);
+      setCredentials({
+        name: result.name ?? user.name,
+        identifier: result.admission_no ?? result.email ?? null,
+        password: result.temporary_password ?? result.password,
+        title: "New temporary password",
+      });
+      await refreshUsers().catch(() => {});
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Couldn't reset that password"));
+    } finally {
+      setResetting(null);
+    }
   }
 
   function handleUserUpdated(updated) {
@@ -300,12 +391,24 @@ export default function AdminUsersPage() {
                   onDeactivate={() => setOpenDeactivate(u)}
                   onActivate={() => handleActivate(u)}
                   onAssign={() => setOpenAssign(u)}
+                  onResetPassword={() => handleResetPassword(u)}
+                  resetting={resetting === u.id}
+                  isSelf={selfId !== null && String(u.id) === String(selfId)}
                 />
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      <TempPasswordDialog
+        isOpen={Boolean(credentials)}
+        onClose={() => setCredentials(null)}
+        name={credentials?.name}
+        identifier={credentials?.identifier}
+        password={credentials?.password}
+        title={credentials?.title}
+      />
 
       <UserDetailModal user={openDetail} onClose={() => setOpenDetail(null)} />
       <DeactivateConfirmModal
@@ -329,6 +432,18 @@ export default function AdminUsersPage() {
         defaultValues={createDefaults}
         userToEdit={userToEdit}
         onCreated={(c) => handleProvisioned(c, createDefaults?.pending_id)}
+        /*
+          Asked after a write that got no answer: did it happen anyway? The
+          page owns the list, so it is the thing that can go and look.
+        */
+        onVerifyCreated={async (name) => {
+          try {
+            const fresh = await refreshUsers();
+            return (fresh ?? []).some((u) => u.name === name);
+          } catch {
+            return false;
+          }
+        }}
         onUpdated={handleUserUpdated}
       />
     </motion.div>
@@ -353,6 +468,9 @@ function UserRow({
   onDeactivate,
   onActivate,
   onAssign,
+  onResetPassword,
+  resetting,
+  isSelf,
 }) {
   const role = ROLE_TONE[user.role] ?? ROLE_TONE.student;
   const initial = user.name?.charAt(0).toUpperCase() ?? "?";
@@ -436,6 +554,33 @@ function UserRow({
           <IconButton onClick={onEdit} title="Edit user">
             <Pencil className="h-4 w-4" />
           </IconButton>
+          {/*
+            Confirmed before it fires: a reset ends every session this
+            account has and invalidates the password they are using.
+          */}
+          <IconButton
+            onClick={() => {
+              const ok = window.confirm(
+                `Issue a new temporary password for ${user.name}?\n\n` +
+                  "Their current password stops working immediately and they " +
+                  "will be signed out everywhere. You will be shown the new " +
+                  "password once."
+              );
+              if (ok) onResetPassword?.();
+            }}
+            title={
+              isSelf
+                ? "Change your own password in Settings"
+                : "Reset password"
+            }
+            disabled={resetting || isSelf}
+          >
+            {resetting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <KeyRound className="h-4 w-4" />
+            )}
+          </IconButton>
           {user.role === "instructor" && (
             <IconButton onClick={onAssign} title="Assign to course">
               <BookOpen className="h-4 w-4" />
@@ -468,7 +613,7 @@ function IconButton({ children, className = "", ...rest }) {
   return (
     <button
       type="button"
-      className={`grid h-8 w-8 place-items-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] ${className}`}
+      className={`grid h-8 w-8 place-items-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent ${className}`}
       {...rest}
     >
       {children}

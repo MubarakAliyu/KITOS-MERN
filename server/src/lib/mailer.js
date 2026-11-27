@@ -31,6 +31,25 @@ function getTransporter() {
       env.SMTP_USER && env.SMTP_PASSWORD
         ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD }
         : undefined,
+    /**
+     * Give up rather than hang.
+     *
+     * Render's free tier blocks outbound SMTP, and a blocked port does not
+     * refuse the connection — it drops the packets. With no timeout set,
+     * nodemailer waits on the operating system's default, which is minutes.
+     * That is what made creating a user look as though it had failed: the
+     * account was written, the request then sat waiting on Gmail, and the
+     * browser gave up first. The administrator saw "Couldn't create user"
+     * about a user who existed, and the one-time password was lost with the
+     * response that never arrived.
+     *
+     * Nothing waits on email any more (`sendMailInBackground`), so these
+     * bound a background task rather than a request — but an unbounded
+     * socket is still a socket held open for nothing.
+     */
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
   });
   return transporter;
 }
@@ -44,6 +63,43 @@ function outboxName(to, subject) {
     .replace(/^-|-$/g, "")
     .slice(0, 60);
   return `${stamp}-${slug}.eml`;
+}
+
+/**
+ * Sends a message **without making anyone wait for it**.
+ *
+ * No request may depend on email (see the timeouts in `getTransporter` for
+ * what happens when one does). Delivery is a side effect of an action, not
+ * part of it: a receipt that cannot be emailed is still a receipt, and a
+ * parent whose welcome message bounces still has a child on the platform.
+ *
+ * Deliberately not awaited by callers, which is why it takes the logging on
+ * itself — a rejected promise nobody is holding would otherwise be an
+ * unhandled rejection, and in Node that is a process-level event rather
+ * than a line in a log. `sendMail` already swallows its own errors; this
+ * guards the case where it somehow throws anyway.
+ *
+ * @param {{ to: string, subject: string, text: string, html?: string }} message
+ * @param {string} [context] What the mail was for, for the log line.
+ */
+export function sendMailInBackground(message, context = "email") {
+  queueMicrotask(() => {
+    sendMail(message)
+      .then((result) => {
+        if (!result.delivered) {
+          logger.warn(
+            { to: message.to, subject: message.subject, context },
+            "Background email was not delivered"
+          );
+        }
+      })
+      .catch((err) => {
+        logger.error(
+          { err, to: message.to, subject: message.subject, context },
+          "Background email threw"
+        );
+      });
+  });
 }
 
 /**
@@ -116,40 +172,15 @@ export function passwordResetEmail({ name, token }) {
 }
 
 /**
- * Sent to a new account holder who has their own email address — staff,
- * parents, and the occasional pupil who has one.
+ * Sent to the parent when a child's login is provisioned.
  *
- * A child's details go to their parent instead (`childAccountEmail`), which
- * is why this is a separate template rather than a branch inside that one:
- * the two have different recipients and different things to say about who
- * may keep the password.
+ * Carries the admission number and **not** the password. A temporary
+ * password is shown once, on screen, to whoever created the account; an
+ * emailed copy sits in an inbox for years, and is a credential sitting in
+ * the least controlled place anyone owns. The admission number is an
+ * identifier rather than a secret, so it is useful here and safe to send.
  */
-export function accountCreatedEmail({ name, role, identifier, tempPassword }) {
-  return {
-    subject: "Your Kids In Tech account",
-    text: [
-      `Hello ${name || "there"},`,
-      "",
-      `An account has been created for you on Kids In Tech as a ${role}.`,
-      "",
-      `Sign in with: ${identifier}`,
-      `Temporary password: ${tempPassword}`,
-      "",
-      "You will be asked to choose your own password the first time you sign in.",
-      "",
-      `Sign in at ${env.CLIENT_ORIGIN}/login`,
-      "",
-      "Kids In Tech",
-    ].join("\n"),
-  };
-}
-
-/**
- * Sent to the parent when a child's login is provisioned. Carries the
- * admission number and the one-time password the child must change on first
- * sign-in.
- */
-export function childAccountEmail({ parentName, childName, admissionNo, tempPassword }) {
+export function childAccountEmail({ parentName, childName, admissionNo }) {
   return {
     subject: `Login details for ${childName}`,
     text: [
@@ -158,10 +189,11 @@ export function childAccountEmail({ parentName, childName, admissionNo, tempPass
       `${childName}'s Kids In Tech account is ready.`,
       "",
       `Admission number: ${admissionNo}`,
-      `Temporary password: ${tempPassword}`,
+      "",
+      "The temporary password was shown on screen when the account was",
+      "created. If you no longer have it, ask Kids In Tech to reset it.",
       "",
       "They will be asked to choose their own password the first time they sign in.",
-      "Please keep these details safe and share them only with your child.",
       "",
       `Sign in at ${env.CLIENT_ORIGIN}/login`,
       "",

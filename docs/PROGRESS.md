@@ -9,6 +9,37 @@
 
 ## Log
 
+### Production fix — temporary passwords, and nothing waiting on email (27 Nov 2026)
+
+Creating a user reported failure and created the user. The write had always succeeded; `createUser`
+then awaited an email of the one-time password, Render's free tier blocks outbound SMTP with no
+timeout set, and the browser gave up before the server did. The password existed only in the
+response that never arrived, and the server keeps a bcrypt hash — so two instructor accounts were
+left unreachable with no way to recover them from the product.
+
+- **Temporary passwords are never emailed** (ADR-038). Create and reset return the password, and
+  `TempPasswordDialog` shows it in large monospace with a Copy button, closing only on "Done" — no
+  backdrop click, no Escape, no timer, because it is the only copy there will ever be.
+- **`POST /admin/users/:id/reset-password`** — admin only, on every user row. Issues a new password,
+  ends every session that account has, forces a change at next sign-in, and writes
+  `reset_user_password` to `activity_logs`. An administrator's own row is disabled: the reset
+  invalidates the token the screen is holding, so they would be signed out before they could read
+  the password.
+- **No request waits on email.** The remaining senders go through `sendMailInBackground`; failures
+  are logged, never reported as a failed action. The SMTP transport now has explicit connection,
+  greeting and socket timeouts.
+- **A timed-out write is verified before it is called a failure.** `isTimeoutOrNetworkError` tells
+  "no reply" from "refused", and the create-user form re-reads the list before reporting anything.
+
+Tests: seven server tests on the reset endpoint (new password, forced change, every session ended,
+a different password each time, the audit row, admin-only, 404) plus one asserting a password-reset
+request answers in under five seconds with the mail server pointed at a port nothing listens on —
+which hangs for minutes without this change. Two Playwright workflows cover the dialog and the row
+action end to end, including that it does not close on Escape or a backdrop click.
+
+SMTP configuration is unchanged, as asked: receipts and notifications still fail on Render's free
+tier, but they now fail in the background rather than taking a request down with them.
+
 ### Batch 3 — Real-time, payments, admin and deployment (26 Nov 2026)
 
 **What was built**

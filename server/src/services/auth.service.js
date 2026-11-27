@@ -10,7 +10,7 @@ import {
 } from "../lib/tokens.js";
 import { unauthorized, forbidden, badRequest } from "../lib/errors.js";
 import { logActivity } from "../lib/audit.js";
-import { sendMail, passwordResetEmail } from "../lib/mailer.js";
+import { sendMailInBackground, passwordResetEmail } from "../lib/mailer.js";
 import {
   ADMISSION_NO_PATTERN,
   LOGIN_FAILURE_AUDIT_THRESHOLD,
@@ -216,7 +216,10 @@ export async function requestPasswordReset({ email, ip }) {
   await user.save();
 
   const message = passwordResetEmail({ name: user.name, token });
-  await sendMail({ to: user.email, ...message });
+  // Background. A reset request answers the same way whether or not the
+  // address exists, so it has nothing to tell the caller about delivery
+  // anyway — and waiting on SMTP is what made a write look like a failure.
+  sendMailInBackground({ to: user.email, ...message }, "password reset");
 
   await logActivity({
     actor: { id: user._id, role: user.role, name: user.name },

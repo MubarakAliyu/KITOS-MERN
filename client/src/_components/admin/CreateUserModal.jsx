@@ -8,7 +8,11 @@ import { z } from "zod";
 import { AlertCircle, Hash, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { createUser, getAdminUsers, getNextAdmissionNo, updateUser } from "@/_lib/api/admin";
-import { apiErrorMessage, apiFieldErrors } from "@/_lib/api/errors";
+import {
+  apiErrorMessage,
+  apiFieldErrors,
+  isTimeoutOrNetworkError,
+} from "@/_lib/api/errors";
 
 const ROLES = ["admin", "instructor", "student", "parent"];
 const TRACKS = ["Scratch Programming", "Web Development", "Robotics Basics"];
@@ -82,6 +86,12 @@ export default function CreateUserModal({
   onUpdated,
   defaultValues,
   userToEdit,
+  /**
+   * Asked whether a name exists, after a write that got no answer. Returns
+   * true when the account turned out to have been created. Supplied by the
+   * users page, which owns the list and can re-read it.
+   */
+  onVerifyCreated,
 }) {
   const {
     register,
@@ -226,29 +236,49 @@ export default function CreateUserModal({
           : created.email;
 
         /**
-         * The temporary password is shown once, here, and never again — it
-         * is not stored anywhere this screen can read back. So it is a toast
-         * that stays until dismissed rather than one that slides away after
-         * four seconds, and it says how else it reached them.
+         * The password is not in the toast any more.
+         *
+         * A toast was the wrong container for the only copy of a
+         * credential: it is dismissible by accident, stacks behind the
+         * next one, and the long description made it a wall of text. The
+         * page shows it in `TempPasswordDialog` instead, which closes only
+         * on "Done" and has a Copy button. This toast just confirms the
+         * account exists.
          */
-        if (created.temporary_password) {
-          toast.success(`User created \u2014 ${idLine}`, {
-            description:
-              `Temporary password: ${created.temporary_password}. ` +
-              (created.email
-                ? "It has also been emailed to them. "
-                : "There is no email address on this account, so pass it on yourself. ") +
-              "It is shown only once and must be changed at first sign-in.",
-            duration: Infinity,
-            closeButton: true,
-          });
-        } else {
-          toast.success(`User created! ${idLine}`);
-        }
+        toast.success(`User created — ${idLine}`);
         onCreated?.(created);
       }
       onClose?.();
     } catch (error) {
+      /**
+       * A request that never got an answer is not a request that failed.
+       *
+       * This is the bug that prompted the change: the account was created,
+       * the request then waited on an email Render's free tier cannot send,
+       * and the browser timed out first. The administrator was told
+       * "Couldn't create user" about a user who existed — and the one-time
+       * password went down with the response that never arrived.
+       *
+       * Nothing waits on email any more, so this should not recur from that
+       * cause. It stays because the general case does: a cold server, a lost
+       * connection, a slow network. Before calling a write a failure, go and
+       * look.
+       */
+      if (isTimeoutOrNetworkError(error) && !userToEdit) {
+        const found = await onVerifyCreated?.(values.name);
+        if (found) {
+          toast.warning("That account was created", {
+            description:
+              "The server answered too late to show the temporary password. " +
+              "Use \u201cReset password\u201d on their row to issue a new one.",
+            duration: Infinity,
+            closeButton: true,
+          });
+          onClose?.();
+          return;
+        }
+      }
+
       // The server's own field messages, on the inputs and in the toast.
       // "Couldn't create user" was all anyone saw while every admin write in
       // production was failing validation.
@@ -325,9 +355,8 @@ export default function CreateUserModal({
                     </p>
                     <p className="mt-1 text-xs text-[var(--text-secondary)]">
                       It is shown to you <strong>once</strong>, when the
-                      account is created, and emailed to them if this account
-                      has an email address. Write it down before closing the
-                      message — it cannot be shown again.
+                      account is created. Nothing is emailed — send it to
+                      them yourself, and copy it before closing the dialog.
                     </p>
                     <p className="mt-1 text-xs text-[var(--text-secondary)]">
                       They must change it the first time they sign in.
