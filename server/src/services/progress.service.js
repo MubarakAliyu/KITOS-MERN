@@ -44,7 +44,10 @@ export async function progressBreakdown(studentId, courseId) {
     passedQuizzes,
     submittedAssignments,
   ] = await Promise.all([
-    Lesson.countDocuments({ course_id: courseId }),
+    // Drafts are not on the student's timeline, so they are not in the
+    // denominator either: counting a lesson nobody can open would cap a
+    // finished course below 100% and withhold the certificate.
+    Lesson.countDocuments({ course_id: courseId, is_published: { $ne: false } }),
     Quiz.countDocuments({ course_id: courseId }),
     Assignment.countDocuments({ course_id: courseId }),
     LessonCompletion.countDocuments({ student_id: studentId, course_id: courseId }),

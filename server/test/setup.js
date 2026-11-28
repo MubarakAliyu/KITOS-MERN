@@ -1,6 +1,6 @@
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 import mongoose from "mongoose";
-import { afterAll, afterEach } from "vitest";
+import { afterAll, afterEach, beforeEach } from "vitest";
 
 /**
  * One in-memory MongoDB for the whole suite.
@@ -55,6 +55,21 @@ afterEach(async () => {
   await Promise.all(
     Object.values(collections).map((collection) => collection.deleteMany({}))
   );
+});
+
+/**
+ * Re-create the programme tracks the wipe just removed.
+ *
+ * Tracks are rows in `tracks` now rather than a constant, and a real server
+ * creates the four this programme runs on every boot (`ensureTracks` in
+ * `src/index.js`). A test database with no tracks is therefore a database no
+ * deployment ever has — and every course and student write checks the track
+ * against this collection, so without this each one would fail on a
+ * programme track that exists everywhere except here.
+ */
+beforeEach(async () => {
+  const { seedDefaultTracks } = await import("../src/services/track.service.js");
+  await seedDefaultTracks();
 });
 
 afterAll(async () => {

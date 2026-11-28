@@ -1,7 +1,6 @@
 import mongoose from "mongoose";
 import { serializePlugin, avatarInitial } from "../lib/serialize.js";
 import {
-  PROGRAMME_TRACKS,
   STUDENT_STATUSES,
   toTrackLabel,
 } from "../config/constants.js";
@@ -38,7 +37,8 @@ const studentSchema = new mongoose.Schema({
 
   programme_track: {
     type: String,
-    enum: PROGRAMME_TRACKS,
+    // Checked against the `tracks` collection in the service, not by an
+    // enum here — see Course.programme_track.
     required: true,
   },
 

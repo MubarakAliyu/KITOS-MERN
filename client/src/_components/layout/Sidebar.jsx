@@ -22,6 +22,7 @@ import {
   PlayCircle,
   ChevronLeft,
   ChevronRight,
+  Layers,
   LogOut,
 } from "lucide-react";
 import { useSidebarStore } from "@/_store/sidebarStore";
@@ -46,6 +47,7 @@ const ICONS = {
   Film,
   ClipboardCheck,
   PlayCircle,
+  Layers,
 };
 
 // Nav items per role. `labelKey` resolves through the LanguageContext so the
@@ -84,6 +86,7 @@ const NAV_ITEMS = {
     { labelKey: "nav.dashboard", icon: "LayoutDashboard", href: "/admin" },
     { labelKey: "nav.users", icon: "Users", href: "/admin/users" },
     { labelKey: "nav.courses", icon: "BookOpen", href: "/admin/courses" },
+    { labelKey: "nav.tracks", label: "Programme Tracks", icon: "Layers", href: "/admin/tracks" },
     { labelKey: "nav.liveSessions", label: "Live Sessions", icon: "Video", href: "/admin/sessions" },
     { labelKey: "nav.attendanceReports", label: "Attendance Reports", icon: "ClipboardCheck", href: "/admin/sessions/attendance" },
     { labelKey: "nav.adminRecordings", label: "Recordings", icon: "PlayCircle", href: "/admin/sessions/recordings" },

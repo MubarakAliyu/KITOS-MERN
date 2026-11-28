@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useForm } from "react-hook-form";
+import { useTracks } from "@/_lib/content/useTracks";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Loader2, X } from "lucide-react";
@@ -13,14 +14,23 @@ import { apiErrorMessage } from "@/_lib/api/errors";
 
 const PAYMENT_TYPES = ["subscription", "one_time"];
 /** The three programme tracks (PRD §3.1), as the API labels them. */
-const TRACKS = ["Scratch Programming", "Web Development", "Robotics Basics"];
+/**
+ * Programme tracks come from the API (`useTracks`).
+ *
+ * They were three strings hard-coded here, and in three other forms, and
+ * again on the server. Tracks are rows an administrator manages now, so this
+ * form offers whatever the API lists.
+ */
 
 const schema = z.object({
   title: z.string().trim().min(2, "Title is required"),
   description: z.string().trim().min(10, "Add a brief description"),
   price: z.coerce.number().min(0, "Price must be ≥ 0"),
   payment_type: z.enum(PAYMENT_TYPES, { message: "Pick a payment type" }),
-  programme_track: z.enum(TRACKS, { message: "Pick a programme track" }),
+  programme_track: z
+    .string({ error: "Pick a programme track" })
+    .trim()
+    .min(1, "Pick a programme track"),
   instructor_id: z.string().trim().min(1, "Pick an instructor"),
 });
 
@@ -31,6 +41,7 @@ export default function EditCourseModal({
   instructors,
   onUpdated,
 }) {
+  const { tracks } = useTracks({ enabled: isOpen });
   const {
     register,
     handleSubmit,
@@ -103,7 +114,7 @@ export default function EditCourseModal({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
           onClick={onClose}
-          className="fixed inset-0 z-[100] grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] grid place-items-stretch bg-black/60 p-0 backdrop-blur-sm sm:place-items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Edit course"
@@ -114,7 +125,7 @@ export default function EditCourseModal({
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-2xl"
+            className="flex h-full w-full max-w-lg flex-col overflow-hidden bg-[var(--bg-card)] sm:h-auto sm:max-h-[90vh] sm:rounded-2xl sm:border sm:border-[var(--border-color)] sm:shadow-2xl"
           >
             <header className="flex items-start justify-between gap-3 border-b border-[var(--border-color)] px-5 py-4">
               <h2 className="text-lg font-bold text-[var(--text-primary)]">
@@ -207,7 +218,7 @@ export default function EditCourseModal({
                   <option value="" disabled>
                     Select a track…
                   </option>
-                  {TRACKS.map((t) => (
+                  {tracks.map((t) => (
                     <option key={t} value={t}>
                       {t}
                     </option>

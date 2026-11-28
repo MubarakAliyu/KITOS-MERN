@@ -38,6 +38,45 @@ learningRouter.get(
   c.getVerifyCertificate
 );
 
+// ── Programme tracks ────────────────────────────────────────────
+
+/**
+ * Every role may read the tracks: the course forms, the student forms and the
+ * parent's "add a child" form all need the list, and a track name is not
+ * sensitive. Writing them is an admin job, under `users.manage` — the same
+ * permission that governs the rest of the programme's configuration.
+ */
+learningRouter.get(
+  "/tracks",
+  authenticate,
+  validate({ query: s.listTracksQuery }),
+  c.getTracks
+);
+
+learningRouter.post(
+  "/admin/tracks",
+  authenticate,
+  requirePermission("users.manage"),
+  validate({ body: s.createTrackBody }),
+  c.postTrack
+);
+
+learningRouter.put(
+  "/admin/tracks/:id",
+  authenticate,
+  requirePermission("users.manage"),
+  validate({ params: idParamSchema, body: s.updateTrackBody }),
+  c.putTrack
+);
+
+learningRouter.delete(
+  "/admin/tracks/:id",
+  authenticate,
+  requirePermission("users.manage"),
+  validate({ params: idParamSchema }),
+  c.deleteTrack
+);
+
 // ── Courses and content ─────────────────────────────────────────────────────
 
 learningRouter.get(
@@ -78,6 +117,14 @@ learningRouter.post(
   requirePermission("course.edit"),
   validate({ body: s.createModuleBody }),
   c.postModule
+);
+
+learningRouter.put(
+  "/modules/:id",
+  authenticate,
+  requirePermission("course.edit"),
+  validate({ params: idParamSchema, body: s.updateModuleBody }),
+  c.putModule
 );
 
 learningRouter.delete(

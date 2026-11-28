@@ -109,6 +109,41 @@ export const passwordChangeLimiter = rateLimit({
 });
 
 /**
+ * The key for the broad ceiling: the signed-in user, or the IP if there is
+ * nobody signed in.
+ *
+ * It was the IP alone, and a KIT centre is one shared connection. 300
+ * requests a minute sounds generous until it is divided between everyone in
+ * the room: a dashboard loads a dozen endpoints, so the whole centre shared
+ * about twenty-five page loads a minute, and the twenty-sixth person got
+ * "Please slow down" for doing nothing wrong. The end-to-end suite hits the
+ * same wall from one address, which is how this was found — two writes
+ * failed in the second half of a long run and passed on their own.
+ *
+ * Per user, the ceiling still does its job: it stops one client exhausting
+ * the free-tier instance. Unauthenticated traffic keeps the IP bucket, which
+ * is where a flood with no account behind it has to be caught.
+ */
+export function generalKey(req) {
+  /**
+   * The bearer token, hashed — not `req.user`.
+   *
+   * This limiter is mounted in `app.js` before any route, so `authenticate`
+   * has not run and there is no `req.user` to read. The token is not
+   * verified here either, and does not need to be: it is a bucket key, not
+   * an authorization decision. A forged token buys its holder their own
+   * bucket and nothing else, and anything it is sent with still fails
+   * `authenticate` a moment later.
+   */
+  const bearer = req.headers?.authorization;
+  if (typeof bearer === "string" && bearer.length > 0) {
+    const hash = crypto.createHash("sha256").update(bearer).digest("hex");
+    return `token:${hash.slice(0, 32)}`;
+  }
+  return `ip:${ipKeyGenerator(req.ip)}`;
+}
+
+/**
  * A broad ceiling on everything else, so one client cannot exhaust the
  * free-tier instance. Generous enough that a dashboard loading a dozen
  * endpoints at once is nowhere near it.
@@ -117,6 +152,7 @@ export const generalLimiter = rateLimit({
   ...base,
   windowMs: 60 * 1000,
   limit: 300,
+  keyGenerator: generalKey,
   handler: limitHandler("Please slow down and try again shortly."),
 });
 

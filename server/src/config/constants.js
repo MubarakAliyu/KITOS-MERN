@@ -6,9 +6,17 @@ export const ROLES = ["admin", "instructor", "parent", "student"];
 export const LANGUAGES = ["en", "ha"];
 
 /**
- * Programme tracks. PRD §8.2 defines the stored enum as slugs; the retained
- * frontend displays and submits human labels ("Web Development") because the
- * mock fixtures use them. We accept either on input and store the slug.
+ * Programme tracks: seed values and the in-memory registry.
+ *
+ * Tracks used to be this list and nothing else — hard-coded here, hard-coded
+ * again in four React forms, and enforced as a Mongoose enum on three models.
+ * Opening a new track meant a code change and a deploy, which is the wrong
+ * shape for something a centre manager decides.
+ *
+ * They are rows in `tracks` now (see `models/Track.js`). This list is what
+ * the seed creates and what the registry falls back to before the database
+ * has been read, so a serializer called during boot still renders a label
+ * rather than a slug.
  */
 export const PROGRAMME_TRACKS = [
   "scratch",
@@ -17,7 +25,7 @@ export const PROGRAMME_TRACKS = [
   "advanced",
 ];
 
-/** Display labels, as the frontend's mock fixtures and forms use them. */
+/** Display labels for the seeded tracks. */
 export const PROGRAMME_TRACK_LABELS = {
   scratch: "Scratch Programming",
   "web-development": "Web Development",
@@ -25,29 +33,81 @@ export const PROGRAMME_TRACK_LABELS = {
   advanced: "Advanced Track",
 };
 
-/** Accepts a slug or any label the frontend sends; returns the slug. */
+/**
+ * slug → label for every track the database holds.
+ *
+ * Primed from `tracks` at boot and re-primed after every track write, by
+ * `services/track.service.js`. It is a cache, not the source of truth: the
+ * service checks the collection before accepting a track on a course or a
+ * student. Its job is to keep `toTrackLabel` synchronous, because it is
+ * called from inside a dozen serializers and a Mongoose instance method.
+ */
+let trackRegistry = new Map(
+  PROGRAMME_TRACKS.map((slug) => [slug, PROGRAMME_TRACK_LABELS[slug]])
+);
+
+/**
+ * Replaces the registry with what the database holds.
+ *
+ * @param {Array<{ slug: string, name: string }>} tracks
+ */
+export function setTrackRegistry(tracks) {
+  trackRegistry = new Map(tracks.map((t) => [t.slug, t.name]));
+}
+
+/** Every slug the registry knows, in insertion order. */
+export function knownTrackSlugs() {
+  return [...trackRegistry.keys()];
+}
+
+/** Turns a name into the slug stored for it. */
+export function trackNameToSlug(name) {
+  return String(name ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Accepts a slug or any label a form sends; returns the slug, or undefined.
+ *
+ * The retained forms submit human labels ("Web Development") because the mock
+ * fixtures did, so both are matched — exactly first, then by label, then by
+ * prefix for near-misses like "Robotics Basics".
+ */
 export function toTrackSlug(value) {
   if (!value) return undefined;
   const raw = String(value).trim();
-  const slug = raw.toLowerCase().replace(/\s+/g, "-");
-  if (PROGRAMME_TRACKS.includes(slug)) return slug;
+  const slug = trackNameToSlug(raw);
+  if (trackRegistry.has(slug)) return slug;
 
-  const byLabel = Object.entries(PROGRAMME_TRACK_LABELS).find(
-    ([, label]) => label.toLowerCase() === raw.toLowerCase()
+  const byLabel = [...trackRegistry.entries()].find(
+    ([, label]) => String(label).toLowerCase() === raw.toLowerCase()
   );
   if (byLabel) return byLabel[0];
 
   // "Robotics Basics", "Advanced", "Scratch" and similar near-misses.
-  const byPrefix = PROGRAMME_TRACKS.find(
+  return [...trackRegistry.keys()].find(
     (t) => slug.startsWith(t) || t.startsWith(slug)
   );
-  return byPrefix;
 }
 
 /** Slug back to the label the frontend expects to render. */
 export function toTrackLabel(slug) {
-  return PROGRAMME_TRACK_LABELS[slug] ?? slug ?? null;
+  return trackRegistry.get(slug) ?? PROGRAMME_TRACK_LABELS[slug] ?? slug ?? null;
 }
+
+export const TRACK_STATUSES = ["active", "archived"];
+
+/**
+ * The kinds of lesson the editor can author.
+ *
+ * `client/src/_components/instructor/AddLessonModal.jsx` and the content-type
+ * picker in `EditLessonModal` offer exactly these four. The stored enum used
+ * to be `["video", "text"]`, so choosing File or Link failed validation.
+ */
+export const LESSON_CONTENT_TYPES = ["video", "text", "link", "file"];
 
 export const STUDENT_STATUSES = ["pending", "active"];
 

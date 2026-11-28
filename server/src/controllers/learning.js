@@ -1,4 +1,5 @@
 import * as courseService from "../services/course.service.js";
+import * as trackService from "../services/track.service.js";
 import * as assessmentService from "../services/assessment.service.js";
 import * as enrollmentService from "../services/enrollment.service.js";
 import * as sessionService from "../services/session.service.js";
@@ -137,6 +138,16 @@ export const getCourseEditor = handle(async (req, res) => {
 export const postModule = handle(async (req, res) => {
   res.status(201).json(
     await courseService.createModule({ user: req.user, payload: req.body })
+  );
+});
+
+export const putModule = handle(async (req, res) => {
+  res.status(200).json(
+    await courseService.updateModule({
+      user: req.user,
+      moduleId: req.params.id,
+      payload: req.body,
+    })
   );
 });
 
@@ -486,4 +497,43 @@ export const getAdminSessions = handle(async (req, res) => {
 
 export const getAdminAttendanceReport = handle(async (_req, res) => {
   res.status(200).json(await sessionService.attendanceReport());
+});
+
+// ── Programme tracks ────────────────────────────────────────────
+
+export const getTracks = handle(async (req, res) => {
+  const includeArchived =
+    req.query.include_archived === "1" || req.query.include_archived === "true";
+  res.status(200).json(await trackService.listTracks({ includeArchived }));
+});
+
+export const postTrack = handle(async (req, res) => {
+  res.status(201).json(
+    await trackService.createTrack({
+      actor: req.user,
+      payload: req.body,
+      ip: clientIp(req),
+    })
+  );
+});
+
+export const putTrack = handle(async (req, res) => {
+  res.status(200).json(
+    await trackService.updateTrack({
+      actor: req.user,
+      trackId: req.params.id,
+      payload: req.body,
+      ip: clientIp(req),
+    })
+  );
+});
+
+export const deleteTrack = handle(async (req, res) => {
+  res.status(200).json(
+    await trackService.deleteTrack({
+      actor: req.user,
+      trackId: req.params.id,
+      ip: clientIp(req),
+    })
+  );
 });

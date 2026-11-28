@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useForm } from "react-hook-form";
+import { useTracks } from "@/_lib/content/useTracks";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AlertCircle, Hash, Loader2, X } from "lucide-react";
@@ -15,7 +16,13 @@ import {
 } from "@/_lib/api/errors";
 
 const ROLES = ["admin", "instructor", "student", "parent"];
-const TRACKS = ["Scratch Programming", "Web Development", "Robotics Basics"];
+/**
+ * Programme tracks come from the API (`useTracks`).
+ *
+ * They were three strings hard-coded here, and in three other forms, and
+ * again on the server. Tracks are rows an administrator manages now, so this
+ * form offers whatever the API lists.
+ */
 
 // Students no longer require an email. Email becomes a free-form contact
 // field; the admission number is the login identifier.
@@ -93,6 +100,7 @@ export default function CreateUserModal({
    */
   onVerifyCreated,
 }) {
+  const { tracks } = useTracks({ enabled: isOpen });
   const {
     register,
     handleSubmit,
@@ -303,7 +311,7 @@ export default function CreateUserModal({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
           onClick={onClose}
-          className="fixed inset-0 z-[100] grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] grid place-items-stretch bg-black/60 p-0 backdrop-blur-sm sm:place-items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Create user"
@@ -314,7 +322,7 @@ export default function CreateUserModal({
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-2xl"
+            className="flex h-full w-full max-w-lg flex-col overflow-hidden bg-[var(--bg-card)] sm:h-auto sm:max-h-[90vh] sm:rounded-2xl sm:border sm:border-[var(--border-color)] sm:shadow-2xl"
           >
             <header className="flex items-start justify-between gap-3 border-b border-[var(--border-color)] px-5 py-4">
               <h2 className="text-lg font-bold text-[var(--text-primary)]">
@@ -452,7 +460,7 @@ export default function CreateUserModal({
                       <option value="" disabled>
                         Select a track…
                       </option>
-                      {TRACKS.map((t) => (
+                      {tracks.map((t) => (
                         <option key={t} value={t}>
                           {t}
                         </option>

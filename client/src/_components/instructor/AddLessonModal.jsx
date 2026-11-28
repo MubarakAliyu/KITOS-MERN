@@ -94,7 +94,7 @@ export default function AddLessonModal({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
           onClick={onClose}
-          className="fixed inset-0 z-[100] grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] grid place-items-stretch bg-black/60 p-0 backdrop-blur-sm sm:place-items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Add lesson"
@@ -105,7 +105,7 @@ export default function AddLessonModal({
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-2xl"
+            className="flex h-full w-full max-w-lg flex-col overflow-hidden bg-[var(--bg-card)] sm:h-auto sm:max-h-[90vh] sm:rounded-2xl sm:border sm:border-[var(--border-color)] sm:shadow-2xl"
           >
             <header className="flex items-start justify-between gap-3 border-b border-[var(--border-color)] px-5 py-4">
               <h2 className="text-lg font-bold text-[var(--text-primary)]">

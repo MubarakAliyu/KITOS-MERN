@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { serializePlugin } from "../lib/serialize.js";
+import { LESSON_CONTENT_TYPES } from "../config/constants.js";
 
 /**
  * A lesson (PRD §8.2, FR7).
@@ -25,9 +26,17 @@ const lessonSchema = new mongoose.Schema({
     index: true,
   },
   title: { type: String, required: true, trim: true },
+  /**
+   * The editor offers four kinds, so four are stored.
+   *
+   * It offered them before this field accepted them: "video" and "text"
+   * were the whole enum, and picking File or Link in the lesson editor made
+   * `PUT /lessons/:id` fail validation with a message about the request
+   * body. The UI and the model now name the same set.
+   */
   content_type: {
     type: String,
-    enum: ["video", "text"],
+    enum: LESSON_CONTENT_TYPES,
     default: "text",
   },
   youtube_url: { type: String, default: null },
@@ -41,6 +50,16 @@ const lessonSchema = new mongoose.Schema({
   ],
   order_index: { type: Number, default: 1 },
   duration_minutes: { type: Number, default: null },
+  /**
+   * Whether students see this lesson. The editor has had a Published/Draft
+   * switch all along; there was nowhere to put its value, so every save
+   * carrying it was rejected whole.
+   *
+   * Defaults to true: lessons written before this field existed are already
+   * visible, and a migration that hid them would lose content from courses
+   * that are running.
+   */
+  is_published: { type: Boolean, default: true },
 });
 
 lessonSchema.plugin(serializePlugin);

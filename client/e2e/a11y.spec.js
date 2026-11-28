@@ -73,6 +73,7 @@ const MAIN_PAGES = {
     ["dashboard", "/admin"],
     ["users", "/admin/users"],
     ["courses", "/admin/courses"],
+    ["tracks", "/admin/tracks"],
     ["analytics", "/admin/analytics"],
     ["payments", "/admin/payments"],
     ["sessions", "/admin/sessions"],

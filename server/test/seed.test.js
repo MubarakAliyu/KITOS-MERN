@@ -323,7 +323,8 @@ describe("the minimal seed", () => {
     }
 
     // Only what a fresh platform needs: four users, one pupil profile, one
-    // consent, one settings row, one counter and the seed's own audit line.
+    // consent, one settings row, one counter, the four programme tracks and
+    // the seed's own audit line.
     const nonEmpty = Object.entries(counts).filter(([, n]) => n > 0);
     expect(Object.fromEntries(nonEmpty)).toEqual({
       users: 4,
@@ -331,6 +332,7 @@ describe("the minimal seed", () => {
       consents: 1,
       settings: 1,
       counters: 1,
+      tracks: 4,
       activity_logs: 1,
     });
   });

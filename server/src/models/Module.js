@@ -9,6 +9,12 @@ const moduleSchema = new mongoose.Schema({
     required: true,
   },
   title: { type: String, required: true, trim: true },
+  /**
+   * A line or two saying what the module covers, shown under its title in
+   * the editor. Modules could not be edited at all until now, so there was
+   * never anywhere to type one.
+   */
+  description: { type: String, default: "" },
   order_index: { type: Number, default: 1 },
 });
 

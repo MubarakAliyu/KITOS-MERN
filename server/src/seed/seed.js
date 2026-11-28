@@ -43,6 +43,7 @@ import {
   PAYMENTS,
   SUBSCRIPTIONS,
 } from "./courses.js";
+import { Track } from "../models/Track.js";
 import { Course } from "../models/Course.js";
 import { Module } from "../models/Module.js";
 import { Lesson } from "../models/Lesson.js";
@@ -63,6 +64,7 @@ import { Payment } from "../models/Payment.js";
 import { Subscription } from "../models/Subscription.js";
 import { nairaToKobo } from "../lib/serialize.js";
 import { recalculateProgress } from "../services/progress.service.js";
+import { seedDefaultTracks } from "../services/track.service.js";
 import { issueCertificate } from "../services/enrollment.service.js";
 
 /**
@@ -241,6 +243,7 @@ async function clearCollections() {
     Announcement.deleteMany({}),
     Payment.deleteMany({}),
     Subscription.deleteMany({}),
+    Track.deleteMany({}),
   ]);
 }
 
@@ -305,6 +308,11 @@ export function isMinimalSeed() {
 async function runMinimalSeed({ say, passwords, hashes }) {
   say("Clearing every collection…");
   await clearCollections();
+
+  // Tracks come first: courses and students store a track slug, and the
+  // service checks the slug against this collection before saving.
+  say("Opening the programme tracks…");
+  await seedDefaultTracks();
 
   say("Writing platform settings…");
   await Setting.create({ key: "platform", ...SETTINGS, permissions: [] });
@@ -440,6 +448,11 @@ export async function runSeed({ quiet = false } = {}) {
 
   say("Clearing the seeded collections…");
   await clearCollections();
+
+  // Tracks come first: courses and students store a track slug, and the
+  // service checks the slug against this collection before saving.
+  say("Opening the programme tracks…");
+  await seedDefaultTracks();
 
   // ── Cohorts (before students, which reference them) ──────────────────────
   const cohortIds = new Map();

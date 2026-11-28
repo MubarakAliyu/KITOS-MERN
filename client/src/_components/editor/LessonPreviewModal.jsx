@@ -3,15 +3,8 @@
 import { useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Eye, X } from "lucide-react";
-import { PreviewPane } from "@/_components/editor/RichLessonEditor";
-
-function youtubeId(url) {
-  if (!url) return null;
-  const match = url.match(
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&?\s/]+)/
-  );
-  return match ? match[1] : null;
-}
+import LessonContent from "@/_components/content/LessonContent";
+import { youtubeEmbedUrl, youtubeId } from "@/_lib/content/lessonContent";
 
 export default function LessonPreviewModal({ lesson, onClose }) {
   useEffect(() => {
@@ -81,7 +74,7 @@ export default function LessonPreviewModal({ lesson, onClose }) {
                     }}
                   >
                     <iframe
-                      src={`https://www.youtube.com/embed/${ytId}`}
+                      src={youtubeEmbedUrl(ytId)}
                       style={{
                         position: "absolute",
                         top: 0,
@@ -99,7 +92,7 @@ export default function LessonPreviewModal({ lesson, onClose }) {
               <h1 className="mb-4 text-2xl font-bold text-[var(--text-primary)]">
                 {lesson.title}
               </h1>
-              <PreviewPane html={lesson.body_content ?? ""} />
+              <LessonContent content={lesson.body_content} />
             </div>
 
             <footer className="flex items-center justify-between gap-2 border-t border-[var(--border-color)] px-5 py-3">

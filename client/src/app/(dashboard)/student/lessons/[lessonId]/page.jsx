@@ -4,6 +4,8 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
+import LessonContent from "@/_components/content/LessonContent";
+import { youtubeEmbedUrl, youtubeId } from "@/_lib/content/lessonContent";
 import {
   ArrowLeft,
   ArrowRight,
@@ -33,19 +35,6 @@ const CONFETTI = [
   { Icon: Sparkles, color: "#EF4444" },
 ];
 
-function extractYouTubeId(url) {
-  if (!url) return "";
-  // ?v= form
-  const vMatch = url.match(/[?&]v=([^&]+)/);
-  if (vMatch) return vMatch[1];
-  // youtu.be/ID form
-  const shortMatch = url.match(/youtu\.be\/([^?&]+)/);
-  if (shortMatch) return shortMatch[1];
-  // /embed/ID form (already an embed URL)
-  const embedMatch = url.match(/\/embed\/([^?&]+)/);
-  if (embedMatch) return embedMatch[1];
-  return "";
-}
 
 export default function LessonViewerPage({ params }) {
   const { lessonId } = use(params);
@@ -72,7 +61,7 @@ export default function LessonViewerPage({ params }) {
 
   if (loading || !lesson) return <LessonSkeleton />;
 
-  const videoId = extractYouTubeId(lesson.youtube_url);
+  const videoId = youtubeId(lesson.youtube_url);
   const currentIndex = siblings.findIndex((s) => s.id === lesson.id);
   const prev = currentIndex > 0 ? siblings[currentIndex - 1] : null;
   const next = currentIndex < siblings.length - 1 ? siblings[currentIndex + 1] : null;
@@ -104,7 +93,7 @@ export default function LessonViewerPage({ params }) {
         {videoId ? (
           <div className="overflow-hidden rounded-2xl border border-[var(--border-color)] bg-black">
             <iframe
-              src={`https://www.youtube.com/embed/${videoId}`}
+              src={youtubeEmbedUrl(videoId)}
               title={lesson.title}
               className="aspect-video w-full"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -120,9 +109,21 @@ export default function LessonViewerPage({ params }) {
         <h1 className="text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">
           {lesson.title}
         </h1>
-        <p className="whitespace-pre-line text-sm text-[var(--text-secondary)] sm:text-base">
-          {lesson.body_content}
-        </p>
+        {/*
+          The lesson body, through the same renderer the editor previews with.
+          It used to be printed as plain text in this paragraph, which is why
+          a Markdown lesson showed "# Introduction" and "**Stage:**" to the
+          children while the instructor's preview showed headings and bold.
+        */}
+        <LessonContent
+          content={lesson.body_content}
+          className="text-sm sm:text-base"
+          empty={
+            <p className="text-sm text-[var(--text-muted)]">
+              This lesson has no written notes yet.
+            </p>
+          }
+        />
 
         <div className="border-t border-[var(--border-color)] pt-4">
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
