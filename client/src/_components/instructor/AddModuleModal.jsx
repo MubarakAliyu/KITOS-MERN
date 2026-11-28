@@ -40,13 +40,11 @@ export default function AddModuleModal({
   /**
    * The position to offer, read when the dialog opens and not before.
    *
-   * Held in a ref on purpose. `nextOrderIndex` is computed by the editor
-   * page from its module list, so it changes the moment a module is added —
-   * and with it in the dependency array below, the reset ran *while the
-   * dialog was open* and emptied the title someone was part-way through
-   * typing. In the end-to-end suite that surfaced as a form submitted blank
-   * and a modal that would not close; for an administrator it would be a
-   * title vanishing as the page updated underneath them.
+   * In a ref so that it cannot be a dependency of the reset below.
+   * `nextOrderIndex` is computed by the editor page from its module list,
+   * so it changes the moment a module is added — and a reset that ran then
+   * would empty a title someone was part-way through typing. See the note
+   * on the effects for the other half of that problem.
    */
   const nextOrderRef = useRef(nextOrderIndex);
 
@@ -57,15 +55,30 @@ export default function AddModuleModal({
     nextOrderRef.current = nextOrderIndex;
   }, [nextOrderIndex]);
 
+  /**
+   * Two effects, because they answer to different things.
+   *
+   * The reset belongs to the dialog opening. The Escape listener belongs to
+   * `onClose`, which every parent passes as an inline arrow and therefore
+   * hands over fresh on each of its own renders — so with both in one
+   * effect, the form reset itself every time the page behind it re-rendered
+   * and emptied whatever was half-typed. CI caught it as a module form
+   * submitted blank; for an administrator it is a title disappearing as
+   * they type, whenever anything updates the page underneath them.
+   */
   useEffect(() => {
     if (!isOpen) return;
     reset({ title: "", order_index: nextOrderRef.current });
+  }, [isOpen, reset]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, onClose, reset]);
+  }, [isOpen, onClose]);
 
   async function onSubmit(values) {
     try {

@@ -61,6 +61,17 @@ export default function EditLessonModal({ lesson, onClose, onSaved }) {
     );
     setResourceDraft({ title: "", url: "" });
     setEditorMode("edit");
+  }, [lesson]);
+
+  /**
+   * Escape closes the dialog. Its own effect, because `onClose` is an inline
+   * arrow from the parent and so arrives fresh on every render the parent
+   * does — and while it shared an effect with the reset above, the form
+   * emptied itself each time the page behind it re-rendered, discarding
+   * whatever was half-typed.
+   */
+  useEffect(() => {
+    if (!lesson) return;
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
     };

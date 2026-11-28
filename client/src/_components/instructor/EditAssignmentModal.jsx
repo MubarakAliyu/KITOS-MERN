@@ -123,12 +123,23 @@ export default function EditAssignmentModal({
     if (!isOpen) return;
     reset(defaultsFromAssignment(assignment));
     setShowPreview(false);
+  }, [isOpen, assignment, reset]);
+
+  /**
+   * Escape closes the dialog. Its own effect, because `onClose` is an inline
+   * arrow from the parent and so arrives fresh on every render the parent
+   * does — and while it shared an effect with the reset above, the form
+   * emptied itself each time the page behind it re-rendered, discarding
+   * whatever was half-typed.
+   */
+  useEffect(() => {
+    if (!isOpen) return;
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, assignment, onClose, reset]);
+  }, [isOpen, onClose]);
 
   const values = watch();
   const allowLate = values.allow_late;

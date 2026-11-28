@@ -48,6 +48,15 @@ Two smaller things fixed along the way, both found by testing rather than report
   stored as `Scratch &amp; Game Design` and the entity showed on screen; a second save escaped it
   again. The function produces plain text, which React escapes on output, so it decodes now.
 
+**Twelve forms emptied themselves while people were using them.** CI found it, and the captured
+page said it plainly: the Add Module dialog still open, the title box blank, "Title must be at
+least 2 characters" underneath. Each of these modals reset its form and registered its Escape
+listener in one effect, with `onClose` in the dependency array — and every parent passes `onClose`
+as an inline arrow, so it arrives new on each of the parent's own renders. The effect therefore
+re-ran, and the reset went with it, whenever anything re-rendered the page behind the dialog: a
+socket notification, a list refreshing, a sibling's state. Whatever was half-typed went with it.
+The reset now depends on the dialog opening and nothing else; the listener keeps `onClose`.
+
 **The broad rate limit was per address.** The end-to-end suite found it: two writes failed in the
 second half of a long run and passed on their own. 300 requests a minute, counted per IP, is about
 twenty-five dashboard loads for an entire KIT centre on one shared connection — so the twenty-sixth
