@@ -44,15 +44,30 @@ export default function AddChildModal({ isOpen, onClose, onCreated }) {
     defaultValues: { name: "", age: "", programme_track: "" },
   });
 
+  /**
+   * Two effects, because they answer to different things.
+   *
+   * The reset belongs to the dialog opening. The Escape listener belongs to
+   * `onClose`, which every parent passes as an inline arrow and therefore
+   * hands over fresh on each of its own renders — so with both in one
+   * effect, the form reset itself every time the page behind it re-rendered
+   * and emptied whatever was half-typed. CI caught it as a module form
+   * submitted blank; for an administrator it is a title disappearing as they
+   * type, whenever anything updates the page underneath them.
+   */
   useEffect(() => {
     if (!isOpen) return;
     reset({ name: "", age: "", programme_track: "" });
+  }, [isOpen, reset]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, onClose, reset]);
+  }, [isOpen, onClose]);
 
   async function onSubmit(values) {
     try {

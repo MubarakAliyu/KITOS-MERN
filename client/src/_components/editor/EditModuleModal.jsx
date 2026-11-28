@@ -43,12 +43,23 @@ export default function EditModuleModal({ module, onClose, onSaved }) {
       description: module.description ?? "",
       order_index: module.order_index ?? 1,
     });
+  }, [module, reset]);
+
+  /**
+   * Escape closes the dialog. Its own effect, because `onClose` is an inline
+   * arrow from the parent and so arrives fresh on every render the parent
+   * does — and while it shared an effect with the reset above, the form
+   * emptied itself each time the page behind it re-rendered, discarding
+   * whatever was half-typed.
+   */
+  useEffect(() => {
+    if (!module) return;
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [module, onClose, reset]);
+  }, [module, onClose]);
 
   async function onSubmit(values) {
     try {
