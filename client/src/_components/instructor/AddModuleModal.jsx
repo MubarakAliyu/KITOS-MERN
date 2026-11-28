@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -37,15 +37,35 @@ export default function AddModuleModal({
     defaultValues: { title: "", order_index: nextOrderIndex },
   });
 
+  /**
+   * The position to offer, read when the dialog opens and not before.
+   *
+   * Held in a ref on purpose. `nextOrderIndex` is computed by the editor
+   * page from its module list, so it changes the moment a module is added —
+   * and with it in the dependency array below, the reset ran *while the
+   * dialog was open* and emptied the title someone was part-way through
+   * typing. In the end-to-end suite that surfaced as a form submitted blank
+   * and a modal that would not close; for an administrator it would be a
+   * title vanishing as the page updated underneath them.
+   */
+  const nextOrderRef = useRef(nextOrderIndex);
+
+  // Kept current in an effect rather than during render: a ref written while
+  // rendering is a React Compiler warning, and this one only has to be right
+  // by the time the dialog opens.
+  useEffect(() => {
+    nextOrderRef.current = nextOrderIndex;
+  }, [nextOrderIndex]);
+
   useEffect(() => {
     if (!isOpen) return;
-    reset({ title: "", order_index: nextOrderIndex });
+    reset({ title: "", order_index: nextOrderRef.current });
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, onClose, reset, nextOrderIndex]);
+  }, [isOpen, onClose, reset]);
 
   async function onSubmit(values) {
     try {
